@@ -34,7 +34,7 @@ controller_server:
         activate: true
         type: "feedforward"
       hcp:
-        activate: false
+        activate: true
         max_classes: 5
       trajectory:
         reinit_dist: 2.0
