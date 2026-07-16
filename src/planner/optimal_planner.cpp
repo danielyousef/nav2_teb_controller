@@ -491,10 +491,6 @@ bool DiscreteTEBPlanner::hasDiverged() {
 }
 
 void DiscreteTEBPlanner::computeCurrentCost() {
-  if (!params_.FollowPath.optimizer.verbose) {
-    return;
-  }
-
   double total_cost = 0.0;
   std::map<std::string, double> edge_type_costs;
 
@@ -555,6 +551,11 @@ void DiscreteTEBPlanner::computeCurrentCost() {
 
     edge_type_costs[edge_name] += cur_cost;
   }
+
+  cost_ = total_cost;
+
+  if (!params_.FollowPath.optimizer.verbose)
+    return;
 
   RCLCPP_INFO(rclcpp::get_logger("optimal_planner"), "=== Edge Cost Breakdown ===");
   RCLCPP_INFO(rclcpp::get_logger("optimal_planner"), "Total chi2: %.3f", total_cost);

@@ -87,6 +87,8 @@ public:
 
   [[nodiscard]] const TimedElasticBand &getTEB() const override { return teb_; }
 
+  [[nodiscard]] double getCost() const override { return cost_; }
+
   void setFeedback(const ackermann_msgs::msg::AckermannDrive &feedback) override {
     ackermann_feedback_ = feedback;
   }

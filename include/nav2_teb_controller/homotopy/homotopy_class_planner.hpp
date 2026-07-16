@@ -43,6 +43,7 @@ public:
 
   // ── PlannerInterface<TEB> ─────────────────────────────────────────────
   [[nodiscard]] const TimedElasticBand &getTEB() const override;
+  [[nodiscard]] double getCost() const override;
   void setFeedback(const ackermann_msgs::msg::AckermannDrive & /*feedback*/) override;
   void updateObstacleContainer(
       costmap_converter_msgs::msg::ObstacleArrayMsg::ConstSharedPtr /*obstacle_array*/) override;
@@ -91,6 +92,16 @@ private:
    */
   void pruneCandidates();
 
+  /**
+   * @brief Store a fallback candidate from the base planner's current TEB
+   */
+  void storeFallbackCandidate();
+
+  /**
+   * @brief Check if a candidate's H-signature matches the previous best
+   */
+  [[nodiscard]] bool matchesPreviousBest(const TebCandidate &candidate) const;
+
   const teb_controller::Params &params_;
   const Footprint &footprint_;
   nav2_costmap_2d::Costmap2DROS *costmap_ros_;
@@ -102,6 +113,8 @@ private:
   int best_candidate_idx_ = -1;
 
   costmap_converter_msgs::msg::ObstacleArrayMsg::ConstSharedPtr obstacles_;
+
+  TebCandidate::Ptr prev_best_candidate_;
 };
 
 }  // namespace nav2_teb_controller

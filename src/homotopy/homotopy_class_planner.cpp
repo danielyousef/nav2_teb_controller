@@ -15,7 +15,7 @@ HomotopyClassPlanner::HomotopyClassPlanner(const teb_controller::Params &params,
 }
 
 bool HomotopyClassPlanner::plan(const nav_msgs::msg::Path &global_plan,
-                                const geometry_msgs::msg::Twist &start_vel) { (void)start_vel;
+                                 const geometry_msgs::msg::Twist &start_vel) {
   if (!graph_search_ || !base_planner_) {
     RCLCPP_ERROR(rclcpp::get_logger("HomotopyClassPlanner"),
                  "GraphSearch or BasePlanner not set!");
@@ -34,7 +34,10 @@ bool HomotopyClassPlanner::plan(const nav_msgs::msg::Path &global_plan,
   if (!obstacles_) {
     RCLCPP_WARN(rclcpp::get_logger("HomotopyClassPlanner"),
                 "No obstacle data available. Falling back to base planner.");
-    return base_planner_->plan(global_plan, start_vel);
+    bool success = base_planner_->plan(global_plan, start_vel);
+    if (success)
+      storeFallbackCandidate();
+    return success;
   }
 
   // --- Step 1: Find homotopy-distinct paths via graph search ---
@@ -45,7 +48,10 @@ bool HomotopyClassPlanner::plan(const nav_msgs::msg::Path &global_plan,
   if (!found || classes.empty()) {
     RCLCPP_WARN(rclcpp::get_logger("HomotopyClassPlanner"),
                 "No homotopy classes found. Falling back to base planner.");
-    return base_planner_->plan(global_plan, start_vel);
+    bool success = base_planner_->plan(global_plan, start_vel);
+    if (success)
+      storeFallbackCandidate();
+    return success;
   }
 
   RCLCPP_DEBUG(rclcpp::get_logger("HomotopyClassPlanner"),
@@ -60,13 +66,19 @@ bool HomotopyClassPlanner::plan(const nav_msgs::msg::Path &global_plan,
   if (best_candidate_idx_ < 0) {
     RCLCPP_WARN(rclcpp::get_logger("HomotopyClassPlanner"),
                 "No feasible candidate found. Falling back to base planner.");
-    return base_planner_->plan(global_plan, start_vel);
+    bool success = base_planner_->plan(global_plan, start_vel);
+    if (success)
+      storeFallbackCandidate();
+    return success;
   }
 
   RCLCPP_DEBUG(rclcpp::get_logger("HomotopyClassPlanner"),
                "Selected candidate %d with cost %.3f",
                best_candidate_idx_,
                candidates_[best_candidate_idx_]->optimization_cost);
+
+  // Save best candidate for next cycle's warm-start
+  prev_best_candidate_ = candidates_[best_candidate_idx_];
 
   return true;
 }
@@ -79,7 +91,6 @@ bool HomotopyClassPlanner::hasDiverged() {
   if (best->has_diverged)
     return true;
 
-  // Delegate to base planner if available
   if (base_planner_)
     return base_planner_->hasDiverged();
 
@@ -89,12 +100,19 @@ bool HomotopyClassPlanner::hasDiverged() {
 void HomotopyClassPlanner::clear() {
   candidates_.clear();
   best_candidate_idx_ = -1;
+  prev_best_candidate_.reset();
   if (base_planner_)
     base_planner_->clear();
 }
 
 const TimedElasticBand &HomotopyClassPlanner::getTEB() const {
   return getBestCandidate().teb;
+}
+
+double HomotopyClassPlanner::getCost() const {
+  if (candidates_.empty() || best_candidate_idx_ < 0)
+    return std::numeric_limits<double>::infinity();
+  return candidates_[best_candidate_idx_]->optimization_cost;
 }
 
 void HomotopyClassPlanner::setFeedback(
@@ -115,6 +133,8 @@ void HomotopyClassPlanner::updateObstacleContainer(
 void HomotopyClassPlanner::setObstacleMap(const ObstacleMap2D *esdf) {
   if (base_planner_)
     base_planner_->setObstacleMap(esdf);
+  if (graph_search_)
+    graph_search_->setObstacleMap(esdf);
 }
 
 void HomotopyClassPlanner::setFixedGoal(bool fix) {
@@ -150,13 +170,8 @@ bool HomotopyClassPlanner::findHomotopyClasses(
 
 void HomotopyClassPlanner::optimizeCandidates(
     const std::vector<GraphSearchResult> &classes,
-    const geometry_msgs::msg::Twist &start_vel) { (void)start_vel;
-  // Rebuild or update candidates for each homotopy class
+    const geometry_msgs::msg::Twist &start_vel) {
   updateCandidates(classes);
-
-  // Run TEB optimization for each candidate
-  int no_inner_iterations = params_.FollowPath.optimizer.no_inner_iterations; (void)no_inner_iterations;
-  int no_outer_iterations = params_.FollowPath.optimizer.no_outer_iterations; (void)no_outer_iterations;
 
   for (auto &candidate : candidates_) {
     if (candidate->teb.sizePoses() < 2) {
@@ -165,19 +180,46 @@ void HomotopyClassPlanner::optimizeCandidates(
       continue;
     }
 
-    // Build the optimization graph and run it
-    // Note: This delegates to the base planner's optimization approach
-    // For now, we wrap the candidate TEB into the base planner
-    // In a full implementation, each candidate would get its own optimizer instance
-    if (base_planner_) {
-      // The base planner is used for the initial velocity and obstacle setup
-      base_planner_->setFixedGoal(true);
-
-      // Run the candidate through the optimization pipeline
-      // (In a production implementation, each candidate would run independently)
-      // For now, we set the candidate as the base planner's TEB and optimize
+    if (!base_planner_) {
       candidate->optimization_cost = 0.0;
       candidate->is_feasible = true;
+      continue;
+    }
+
+    // Build a nav_msgs::Path from the candidate poses
+    nav_msgs::msg::Path path;
+    path.poses.reserve(candidate->teb.sizePoses());
+    for (std::size_t j = 0; j < candidate->teb.sizePoses(); ++j) {
+      geometry_msgs::msg::PoseStamped ps;
+      ps.pose = candidate->teb.pose(j).toPoseMsg();
+      path.poses.push_back(std::move(ps));
+    }
+
+    // Warm-start: if this candidate's H-signature matches the previous best,
+    // don't clear the base planner so plan() can warm-start from the existing TEB
+    bool warm_start = matchesPreviousBest(*candidate);
+
+    if (!warm_start) {
+      base_planner_->clear();
+    }
+    base_planner_->setFixedGoal(true);
+    bool success = base_planner_->plan(path, start_vel);
+    bool diverged = base_planner_->hasDiverged();
+
+    if (!success || diverged) {
+      candidate->is_feasible = false;
+      candidate->has_diverged = diverged;
+      candidate->optimization_cost = std::numeric_limits<double>::infinity();
+      RCLCPP_DEBUG(rclcpp::get_logger("HomotopyClassPlanner"),
+                   "Candidate optimization failed (success=%d diverged=%d)", success, diverged);
+    } else {
+      const auto &new_teb = base_planner_->getTEB();
+      candidate->teb = new_teb;
+      candidate->is_feasible = true;
+      candidate->optimization_cost = base_planner_->getCost();
+      RCLCPP_DEBUG(rclcpp::get_logger("HomotopyClassPlanner"),
+                   "Candidate optimized cost=%.3f poses=%zu",
+                   candidate->optimization_cost, candidate->teb.sizePoses());
     }
   }
 
@@ -235,13 +277,31 @@ void HomotopyClassPlanner::updateCandidates(
 }
 
 void HomotopyClassPlanner::pruneCandidates() {
-  // Remove candidates that have diverged or are infeasible
   auto it = std::remove_if(candidates_.begin(), candidates_.end(),
       [](const TebCandidate::Ptr &c) {
         return c->has_diverged || !c->is_feasible ||
                std::isinf(c->optimization_cost);
       });
   candidates_.erase(it, candidates_.end());
+}
+
+void HomotopyClassPlanner::storeFallbackCandidate() {
+  auto candidate = std::make_shared<TebCandidate>();
+  candidate->teb = base_planner_->getTEB();
+  candidate->is_feasible = true;
+  candidate->optimization_cost = base_planner_->getCost();
+  candidate->has_diverged = false;
+
+  candidates_.clear();
+  candidates_.push_back(candidate);
+  best_candidate_idx_ = 0;
+  prev_best_candidate_ = candidate;
+}
+
+bool HomotopyClassPlanner::matchesPreviousBest(const TebCandidate &candidate) const {
+  if (!prev_best_candidate_)
+    return false;
+  return candidate.h_signature.isEqual(prev_best_candidate_->h_signature, 1e-3);
 }
 
 }  // namespace nav2_teb_controller

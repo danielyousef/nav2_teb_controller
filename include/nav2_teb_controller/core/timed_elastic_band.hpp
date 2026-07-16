@@ -25,9 +25,9 @@ public:
   TimedElasticBand() = default;
   ~TimedElasticBand() = default;
 
-  // Non-copyable, movable
-  TimedElasticBand(const TimedElasticBand &) = delete;
-  TimedElasticBand &operator=(const TimedElasticBand &) = delete;
+  // Copyable (needed for HCP candidate management)
+  TimedElasticBand(const TimedElasticBand &) = default;
+  TimedElasticBand &operator=(const TimedElasticBand &) = default;
   TimedElasticBand(TimedElasticBand &&) = default;
   TimedElasticBand &operator=(TimedElasticBand &&) = default;
 

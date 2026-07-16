@@ -2,6 +2,7 @@
 #include "nav2_teb_controller/homotopy/graph_search_interface.hpp"
 #include "nav2_teb_controller/homotopy/h_signature.hpp"
 #include "nav2_teb_controller/homotopy/visibility_graph.hpp"
+#include "nav2_teb_controller/obstacles/esdf.hpp"
 
 namespace nav2_teb_controller {
 
@@ -13,15 +14,19 @@ namespace nav2_teb_controller {
  * 2) Dijkstra shortest path (trivial class)
  * 3) Yen's K-Shortest Paths (alternative classes)
  * 4) H-Signature filter (remove duplicates)
+ *
+ * Visibility checks use the ESDF layer instead of polygon intersection + inflation.
  */
 class VisibilityGraphSearch : public GraphSearchInterface {
 public:
-  explicit VisibilityGraphSearch(double inflation_radius = 0.2, double robot_radius = 0.3);
+  VisibilityGraphSearch() = default;
 
   bool search(const PoseSE2 &start, const PoseSE2 &goal, const ObstacleArray &obstacles,
               int max_classes, std::vector<GraphSearchResult> &results) override;
 
   void updateObstacles(const ObstacleArray &obstacles) override;
+
+  void setObstacleMap(const ObstacleMap2D *esdf) override { esdf_ = esdf; }
 
 private:
   /**
@@ -48,8 +53,7 @@ private:
   static void filterDuplicateClasses(std::vector<GraphSearchResult> &results,
                               double h_sig_tolerance = 1e-3) ;
 
-  double inflation_radius_;
-  double robot_radius_;
+  const ObstacleMap2D *esdf_{nullptr};
   VisibilityGraph vis_graph_;
 };
 

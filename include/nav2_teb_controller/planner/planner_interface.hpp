@@ -20,6 +20,7 @@ template <typename TEBType>
 class PlannerInterface : public PlannerBase {
 public:
   [[nodiscard]] virtual const TEBType &getTEB() const = 0;
+  [[nodiscard]] virtual double getCost() const = 0;
   virtual void setFeedback(const ackermann_msgs::msg::AckermannDrive &feedback) = 0;
   virtual void updateObstacleContainer(
       costmap_converter_msgs::msg::ObstacleArrayMsg::ConstSharedPtr obstacle_array = nullptr) = 0;

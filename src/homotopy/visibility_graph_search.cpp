@@ -9,21 +9,16 @@
 
 namespace nav2_teb_controller {
 
-VisibilityGraphSearch::VisibilityGraphSearch(double inflation_radius, double robot_radius)
-    : inflation_radius_(inflation_radius), robot_radius_(robot_radius) {
-  RCLCPP_DEBUG(rclcpp::get_logger("VisibilityGraphSearch"),
-               "Constructed: inflation=%.2f robot_radius=%.2f",
-               inflation_radius_, robot_radius_);
-}
-
 bool VisibilityGraphSearch::search(const PoseSE2 &start, const PoseSE2 &goal,
                                    const ObstacleArray &obstacles, int max_classes,
                                    std::vector<GraphSearchResult> &results) {
   results.clear();
 
-  // Step 1: Build visibility graph (combine inflation + robot radius)
-  vis_graph_.build(start.position(), goal.position(), obstacles,
-                   inflation_radius_ + robot_radius_);
+  // Pass ESDF to the visibility graph for collision-free checks
+  vis_graph_.setObstacleMap(esdf_);
+
+  // Step 1: Build visibility graph (using ESDF instead of inflation)
+  vis_graph_.build(start.position(), goal.position(), obstacles);
 
   if (vis_graph_.empty()) {
     RCLCPP_WARN(rclcpp::get_logger("VisibilityGraphSearch"), "Empty visibility graph");
@@ -74,8 +69,6 @@ bool VisibilityGraphSearch::search(const PoseSE2 &start, const PoseSE2 &goal,
 }
 
 void VisibilityGraphSearch::updateObstacles(const ObstacleArray &obstacles) {
-  // Cache obstacles for the next search() call
-  // The vis_graph_ is rebuilt on each search() call, so no caching needed here.
   (void)obstacles;
 }
 
@@ -89,7 +82,6 @@ std::vector<int> VisibilityGraphSearch::dijkstra(const VisibilityGraph &graph,
   std::vector<int> prev(n, -1);
   std::vector<bool> visited(n, false);
 
-  // Priority queue: (distance, node_id)
   using PrioPair = std::pair<double, int>;
   std::priority_queue<PrioPair, std::vector<PrioPair>, std::greater<PrioPair>> pq;
 
@@ -118,9 +110,8 @@ std::vector<int> VisibilityGraphSearch::dijkstra(const VisibilityGraph &graph,
     }
   }
 
-  // Reconstruct path
   if (std::isinf(dist[goal_id]))
-    return {}; // No path found
+    return {};
 
   std::vector<int> path;
   for (int v = goal_id; v != -1; v = prev[v])
@@ -132,18 +123,14 @@ std::vector<int> VisibilityGraphSearch::dijkstra(const VisibilityGraph &graph,
 
 std::vector<std::vector<int>> VisibilityGraphSearch::yenKShortestPaths(
     const VisibilityGraph &graph, int start_id, int goal_id, int k) {
-  // Yen's algorithm: find K loopless shortest paths
   std::vector<std::vector<int>> ksp;
 
-  // Step 1: Dijkstra for the first (shortest) path
   auto first_path = dijkstra(graph, start_id, goal_id);
   if (first_path.empty())
     return ksp;
 
   ksp.push_back(first_path);
 
-  // Step 2: Find K-1 alternative paths
-  // We store candidate paths in a min-heap ordered by cost
   using PathCandidate = std::pair<double, std::vector<int>>;
   auto cmp = [](const PathCandidate &a, const PathCandidate &b) {
     return a.first > b.first;
@@ -170,13 +157,8 @@ std::vector<std::vector<int>> VisibilityGraphSearch::yenKShortestPaths(
     for (size_t spur_idx = 0; spur_idx < prev_path.size() - 1; ++spur_idx) {
       int spur_node = prev_path[spur_idx];
 
-      // Root path: start → spur_node
       std::vector<int> root_path(prev_path.begin(), prev_path.begin() + spur_idx + 1);
 
-      // Remove edges/nodes used in previous paths that share the same root
-      // We'll build a modified graph by removing specific edges
-
-      // For simplicity, we build a set of blocked edges
       std::set<std::pair<int, int>> blocked_edges;
 
       for (const auto &p : ksp) {
@@ -194,16 +176,11 @@ std::vector<std::vector<int>> VisibilityGraphSearch::yenKShortestPaths(
         }
       }
 
-      // Build a reduced graph by skipping blocked edges and running Dijkstra
-      // Since we can't easily modify the graph structure, we implement
-      // a custom Dijkstra that respects blocked edges and spur node removal
-
       const int n = static_cast<int>(nodes.size());
       std::vector<double> dist(n, std::numeric_limits<double>::infinity());
       std::vector<int> prev(n, -1);
       std::vector<bool> visited(n, false);
 
-      // Remove spur node and all nodes in root path (except the spur node itself)
       std::set<int> removed_nodes(root_path.begin(), root_path.end() - 1);
 
       using PrioPair = std::pair<double, int>;
@@ -226,11 +203,9 @@ std::vector<std::vector<int>> VisibilityGraphSearch::yenKShortestPaths(
         for (const auto &edge : graph.edges(u)) {
           int v = edge.to_id;
 
-          // Check if this edge is blocked
           if (blocked_edges.count({u, v}))
             continue;
 
-          // Check if v is a removed node
           if (removed_nodes.count(v))
             continue;
 
@@ -243,15 +218,12 @@ std::vector<std::vector<int>> VisibilityGraphSearch::yenKShortestPaths(
         }
       }
 
-      // If a spur path was found
       if (!std::isinf(dist[goal_id])) {
-        // Reconstruct spur path
         std::vector<int> spur_path;
         for (int v = goal_id; v != -1; v = prev[v])
           spur_path.push_back(v);
         std::reverse(spur_path.begin(), spur_path.end());
 
-        // Combine root path + spur path
         std::vector<int> total_path = root_path;
         total_path.insert(total_path.end(), spur_path.begin(), spur_path.end());
 
@@ -260,12 +232,10 @@ std::vector<std::vector<int>> VisibilityGraphSearch::yenKShortestPaths(
       }
     }
 
-    // Pick the best candidate that is not already in ksp
     while (!candidates.empty()) {
       auto [cost, path] = candidates.top();
       candidates.pop();
 
-      // Check if this path is already in ksp
       bool already_found = false;
       for (const auto &existing : ksp) {
         if (existing == path) {
@@ -280,7 +250,6 @@ std::vector<std::vector<int>> VisibilityGraphSearch::yenKShortestPaths(
       }
     }
 
-    // If no more candidates, we're done
     if (candidates.empty())
       break;
   }
@@ -296,20 +265,15 @@ std::vector<PoseSE2> VisibilityGraphSearch::nodePathToPoses(
   const auto &nodes = graph.nodes();
   for (int id : node_path) {
     if (id >= 0 && id < static_cast<int>(nodes.size())) {
-      // Convert 2D position to PoseSE2
-      // The orientation is assigned based on direction to next pose
-      // (except for the last pose which uses the previous direction)
       poses.emplace_back(nodes[id].pos.x(), nodes[id].pos.y(), 0.0);
     }
   }
 
-  // Assign orientations from direction of travel
   for (size_t i = 0; i + 1 < poses.size(); ++i) {
     Eigen::Vector2d dir = poses[i + 1].position() - poses[i].position();
     double theta = std::atan2(dir.y(), dir.x());
     poses[i].theta() = theta;
   }
-  // Last pose keeps the same orientation as the second-to-last
   if (poses.size() >= 2) {
     poses.back().theta() = poses[poses.size() - 2].theta();
   }

@@ -5,6 +5,7 @@
 
 #include "nav2_teb_controller/core/pose_se2.hpp"
 #include "nav2_teb_controller/homotopy/h_signature.hpp"
+#include "nav2_teb_controller/obstacles/esdf.hpp"
 
 namespace nav2_teb_controller {
 
@@ -42,6 +43,11 @@ public:
    * @brief Update obstacle data (e.g. dynamic obstacles)
    */
   virtual void updateObstacles(const ObstacleArray &obstacles) = 0;
+
+  /**
+   * @brief Set the ESDF for collision-free visibility checks
+   */
+  virtual void setObstacleMap(const ObstacleMap2D *esdf) = 0;
 };
 
 }  // namespace nav2_teb_controller

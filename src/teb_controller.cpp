@@ -73,7 +73,7 @@ void TEBController::configure(const rclcpp_lifecycle::LifecycleNode::WeakPtr &pa
                  "Disable 'hcp.activate' — falling back to direct planner is not possible either, "
                  "the HCP placeholder will fail at plan() time.");
     auto p = std::make_shared<DiscreteTEBPlanner>(params_, footprint_, costmap_ros_.get());
-    auto gs = std::make_shared<VisibilityGraphSearch>(0.5, 0.5);  // inflation_radius, robot_radius
+    auto gs = std::make_shared<VisibilityGraphSearch>();
     auto hcp = std::make_unique<HomotopyClassPlanner>(params_, footprint_, costmap_ros_.get());
     hcp->setBasePlanner(p);
     hcp->setGraphSearch(gs);
