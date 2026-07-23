@@ -28,6 +28,8 @@ public:
 
   void setObstacleMap(const ObstacleMap2D *esdf) override { esdf_ = esdf; }
 
+  [[nodiscard]] const VisibilityGraph &getVisibilityGraph() const { return vis_graph_; }
+
 private:
   /**
    * @brief Dijkstra on visibility graph

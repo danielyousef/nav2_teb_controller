@@ -64,6 +64,9 @@ public:
   /** @brief Get best TEB candidate */
   [[nodiscard]] const TebCandidate &getBestCandidate() const;
 
+  /** @brief Get the graph search (for visualization) */
+  [[nodiscard]] const GraphSearchInterface *getGraphSearch() const { return graph_search_.get(); }
+
 private:
   /**
    * @brief Step 1: Visibility graph search → GraphSearchResult paths

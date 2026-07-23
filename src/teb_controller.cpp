@@ -249,6 +249,16 @@ geometry_msgs::msg::TwistStamped TEBController::computeVelocityCommands(
     }
   }
 
+  if (params_.FollowPath.hcp.activate) {
+    if (auto *hcp = dynamic_cast<const HomotopyClassPlanner *>(planner_.get())) {
+      if (auto *vgs =
+              dynamic_cast<const VisibilityGraphSearch *>(hcp->getGraphSearch())) {
+        visualizer_->publishVisibilityGraph(vgs->getVisibilityGraph(), frame_id);
+      }
+      visualizer_->publishHCPCandidates(hcp->getCandidates(), frame_id);
+    }
+  }
+
   // 6. Get velocity command
   {
     PROFILE_BLOCK("velocity_output");
