@@ -40,11 +40,15 @@ Based on the original [`teb_local_planner`](https://github.com/rst-tu-dortmund/t
 ## Quick Start
 
 ```bash
+mkdir -p ~/ros2_ws/src
 cd ~/ros2_ws/src
-git clone <this-repo>
+git clone https://github.com/danielyousef/nav2_teb_controller.git # This repo
 cd ~/ros2_ws
+sudo apt update
+sudo apt install python3-vcstool
+vcs import src < src/nav2_teb_controller/nav2_teb_controller.repos
 rosdep install --from-paths src --ignore-src -r -y
-colcon build --packages-select nav2_teb_controller
+colcon build --packages-up-to nav2_teb_controller
 source install/setup.bash
 ```
 
