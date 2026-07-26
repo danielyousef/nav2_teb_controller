@@ -235,17 +235,18 @@ bool DiscreteTEBPlanner::runPhase(int no_inner_iterations, int no_outer_iteratio
   if (compute_cost_afterwards)
     computeCurrentCost();
 
+  success = !hasDiverged();
   writeBackOptimizedValues();
   clearGraph();
 
-  return true;
+  return success;
 }
 
 bool DiscreteTEBPlanner::buildGraph(OptimizationPhase phase) {
   if (!optimizer_->edges().empty() || !optimizer_->vertices().empty())
     return false;
 
-  bool divergence_detection = params_.FollowPath.recovery.divergence_detection_enable;
+  bool divergence_detection = params_.FollowPath.optimizer.divergence_detection_enable;
   std::string robot_model = params_.FollowPath.robot.robot_model;
   RCLCPP_DEBUG(rclcpp::get_logger("optimal_planner"),
                "DiscreteTEBPlanner: Build graph (phase %d).", static_cast<int>(phase));
@@ -398,6 +399,10 @@ bool DiscreteTEBPlanner::hasDiverged() {
   if (stats_vector.empty())  // No statistics yet
     return false;
   const auto last_iter_stats = stats_vector.back();
+
+  if (params_.FollowPath.optimizer.verbose) {
+    RCLCPP_INFO(rclcpp::get_logger("optimal_planner"), "Last chi2: %.3f", last_iter_stats.chi2);
+  }
 
   if (last_iter_stats.chi2 > max_chi2) {
     RCLCPP_INFO(rclcpp::get_logger("optimal_planner"),
