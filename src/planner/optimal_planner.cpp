@@ -315,7 +315,7 @@ bool DiscreteTEBPlanner::buildGraph(OptimizationPhase phase) {
     addEdgesGeneric<EdgeShortestPath, 1>({2, 0, 1, 0, 1},
                                          {params_.FollowPath.weights.weight_shortest_path});
     addEdgesGeneric<EdgePathSmoothness, 1>({2, 0, 1, 0, 1},
-                                           {params_.FollowPath.weights.weight_shortest_path});
+                                           {params_.FollowPath.weights.weight_path_smoothness});
 
     RCLCPP_DEBUG(rclcpp::get_logger("optimal_planner"),
                  "DiscreteTEBPlanner: Added efficiency edges (phase %d).",
