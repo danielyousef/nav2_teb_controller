@@ -35,9 +35,8 @@ RST – TU Dortmund, redesigned for ROS 2 with ESDF-based obstacle avoidance.
 
 ## Videos
 
-[![New TEB RViz](https://img.youtube.com/vi/BqfFwOXZO0k/hqdefault.jpg)](https://www.youtube.com/watch?v=BqfFwOXZO0k)
-[![New TEB RViz obstacles](https://img.youtube.com/vi/a3creSJZxis/hqdefault.jpg)](https://www.youtube.com/watch?v=a3creSJZxis)
-[![New TEB RViz loose goal](https://img.youtube.com/vi/3201fSL2xvI/hqdefault.jpg)](https://www.youtube.com/watch?v=3201fSL2xvI)
+| New TEB RViz<br/>[<img src="https://img.youtube.com/vi/BqfFwOXZO0k/hqdefault.jpg" width="240" alt="New TEB RViz"/>](https://www.youtube.com/watch?v=BqfFwOXZO0k) | New TEB RViz obstacles<br/>[<img src="https://img.youtube.com/vi/a3creSJZxis/hqdefault.jpg" width="240" alt="New TEB RViz obstacles"/>](https://www.youtube.com/watch?v=a3creSJZxis) | New TEB RViz loose goal<br/>[<img src="https://img.youtube.com/vi/3201fSL2xvI/hqdefault.jpg" width="240" alt="New TEB RViz loose goal"/>](https://www.youtube.com/watch?v=3201fSL2xvI) |
+|:---:|:---:|:---:|
 
 ## Status
 
