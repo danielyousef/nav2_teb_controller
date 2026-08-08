@@ -10,7 +10,8 @@ teb_controller:
     hcp:
       activate:
         type: bool
-        default_value: true
+        default_value: false
+        description: "Activate homotopy class planning. NOT IMPLEMENTED YET — keep false."
 
     path_tracker:
       activate:
@@ -84,16 +85,16 @@ teb_controller:
 
       robot_model: 
         type: string
-        default_value: "bicycle"
-        description: "Robot kinematic model. bicycle or diff_drive, ackermann"
+        default_value: "diff_drive"
+        description: "Robot kinematic model: diff_drive or ackermann (car-like / bicycle)"
         read_only: true
         validation:
-          one_of<>: [["bicycle", "diff_drive", "ackermann"]]
+          one_of<>: [["diff_drive", "ackermann"]]
 
       wheelbase:
         type: double
         default_value: 1.055
-        description: "Wheelbase L in meters. Used by bicycle model only."
+        description: "Wheelbase L in meters. Used by the ackermann (car-like) model and steering-rate edges."
         validation:
           bounds<>: [0.1, 10.0]
 

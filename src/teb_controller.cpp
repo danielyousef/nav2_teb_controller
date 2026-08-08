@@ -61,6 +61,10 @@ void TEBController::configure(const rclcpp_lifecycle::LifecycleNode::WeakPtr &pa
   esdf_update_period_ = rclcpp::Duration::from_seconds(1.0 / esdf_hz);
   // Planner
   if (params_.FollowPath.hcp.activate) {
+    RCLCPP_ERROR(logger_,
+                 "TEBController: Homotopy class planning is NOT implemented yet. "
+                 "Disable 'hcp.activate' — falling back to direct planner is not possible either, "
+                 "the HCP placeholder will fail at plan() time.");
     auto p = std::make_shared<DiscreteTEBPlanner>(params_, footprint_, costmap_ros_.get());
     auto gs = std::make_shared<VisibilityGraphSearch>(0.5, 0.5);  // inflation_radius, robot_radius
     auto hcp = std::make_unique<HomotopyClassPlanner>(params_, footprint_, costmap_ros_.get());
