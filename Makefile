@@ -3,7 +3,7 @@ WS     := $(HOME)/git/ros2_ws
 PKG    := nav2_teb_controller
 SRC    := src
 
-.PHONY: help build test format format-fix lint lint-fix all
+.PHONY: help build test format format-fix lint lint-fix docs docs-check all
 
 help:
 	@echo "Available commands:"
@@ -14,7 +14,9 @@ help:
 	@echo "  make format-fix  		- clang-format mit Fix"
 	@echo "  make lint        		- clang-tidy check (kein Fix)"
 	@echo "  make lint-fix    		- clang-tidy mit Fix"
-	@echo "  make all         		- format + lint + build + test"
+	@echo "  make docs        		- regenerate doc/parameters.md from the parameter schema"
+	@echo "  make docs-check  		- fail if doc/parameters.md is out of date"
+	@echo "  make all         		- format + lint + build + test + docs-check"
 
 build:
 	source /opt/ros/jazzy/setup.bash && \
@@ -63,4 +65,22 @@ lint-fix:
 		$(shell find $(SRC) -name "*.cpp")
 		--fix-errors
 
-all: format lint build test
+# Regenerate doc/parameters.md from config/teb_controller_parameters.yaml
+# (the generate_parameter_library schema is the single source of truth).
+docs:
+	source /opt/ros/jazzy/setup.bash && \
+	python3 scripts/gen_params_docs.py \
+		--input_yaml_file config/teb_controller_parameters.yaml \
+		--output_markdown_file doc/parameters.md
+
+docs-check:
+	@tmp=$$(mktemp -d) && \
+	source /opt/ros/jazzy/setup.bash && \
+	python3 scripts/gen_params_docs.py \
+		--input_yaml_file config/teb_controller_parameters.yaml \
+		--output_markdown_file $$tmp/parameters.md && \
+	diff -u doc/parameters.md $$tmp/parameters.md && \
+	echo "doc/parameters.md is up to date" && \
+	rm -rf $$tmp
+
+all: format lint build test docs-check
