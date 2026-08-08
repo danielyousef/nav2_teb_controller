@@ -3,7 +3,8 @@ teb_controller:
     log_level:
       type: string
       default_value: "debug"
-      description: "ROS logging level"
+      description: >
+        ROS logging level (debug|info|warn|error). Consumed by: TEBController::configure (logger setup).
       read_only: true
       validation:
         one_of<>: [["debug", "info", "warn", "error"]]
@@ -11,82 +12,146 @@ teb_controller:
       activate:
         type: bool
         default_value: false
-        description: "Activate homotopy class planning. NOT IMPLEMENTED YET — keep false."
+        description: >
+          Activate homotopy class planning. NOT IMPLEMENTED YET, keep false: enabling it makes
+          configure() log an error and planning falls back to a stub. Consumed by: TEBController::configure.
 
     path_tracker:
       activate:
         type: bool
         default_value: true
+        description: >
+          If true, extract the velocity command from the optimized band (getVelocityCommand) unless a
+          collision stop was issued. If false, always output a zero velocity. Consumed by:
+          TEBController::computeVelocityCommands.
 
     trajectory:
       reinit_dist:
         type: double
         default_value: 1.055
+        description: >
+          Distance [m] the goal must have moved for the band to be re-initialized from the global plan
+          instead of being warm-started (updateAndPrune). Consumed by: DiscreteTEBPlanner::plan.
       reinit_angle:
         type: double
         default_value: 1.055
+        description: >
+          Heading change [rad] threshold for re-initialization, like reinit_dist. Consumed by:
+          DiscreteTEBPlanner::plan.
       auto_resize:
         type: bool
         default_value: true
+        description: >
+          Automatically insert/remove band poses during optimization based on time steps, segment
+          lengths and heading differences. Consumed by: DiscreteTEBPlanner::optimizeTEB (autoResize).
       dt_ref:
         type: double
         default_value: 0.3
+        description: >
+          Desired time difference [s] between consecutive band poses; used for auto-resizing and for
+          the velocity-command lookahead. Consumed by: autoResize, getVelocityCommand.
       dt_hyst:
         type: double
         default_value: 0.05
+        description: >
+          Hysteresis [s] around dt_ref to avoid oscillating pose insertions/removals. Consumed by:
+          autoResize.
       min_samples:
         type: int
         default_value: 3
+        description: >
+          Minimum number of band poses. Consumed by: autoResize, initFromPath, updateAndPrune.
       max_samples:
         type: int
         default_value: 50
+        description: >
+          Maximum number of band poses. Consumed by: autoResize.
       min_seg_length:
         type: double
         default_value: 0.1
+        description: >
+          Minimum segment length [m]; poses are inserted if a segment is longer than max_seg_length
+          (or shorter than min_seg_length with dt > dt_ref). Consumed by: autoResize.
       max_seg_length:
         type: double
         default_value: 0.3
+        description: >
+          Maximum segment length [m] before poses are inserted. Consumed by: autoResize.
       max_angle_diff:
         type: double
         default_value: 0.15
+        description: >
+          Maximum heading difference [rad] between consecutive poses before a pose is inserted.
+          Consumed by: autoResize.
       overwrite_plan_orientation:
         type: bool
         default_value: false
+        description: >
+          Set the initial pose orientations from the direction of the path segments, overwriting the
+          orientations given in the global plan. Consumed by: initFromPath.
       allow_init_backward:
         type: bool
         default_value: true
+        description: >
+          Allow the band to be initialized with backward motion (reversed pose sequence at the start).
+          Consumed by: initFromPath.
       control_look_ahead_poses:
         type: int
         default_value: 1
+        description: >
+          Number of band segments used as lookahead for the velocity extraction. Consumed by:
+          getVelocityCommand.
       max_global_plan_lookahead_dist:
         type: double
         default_value: 5.0
+        description: >
+          Maximum lookahead distance [m] of the global plan that is transformed into the robot frame.
+          Consumed by: transformAndTrimPlan.
       global_plan_prune_distance:
         type: double
         default_value: 0.5
+        description: >
+          Poses of the global plan farther behind the robot than this distance [m] are pruned.
+          Consumed by: pruneGlobalPlan.
       control_min_look_ahead_time:
         type: double
         default_value: 0.0
+        description: >
+          Minimum lookahead time [s] for the velocity extraction. Consumed by: getVelocityCommand.
       min_prune_distance:
         type: double
         default_value: 0.0
+        description: >
+          Minimum distance [m] the band start pose may lag behind the robot pose before the first pose
+          is dropped. Consumed by: updateAndPrune.
 
     robot:
       footprint:
           use_local_costmap:
             type: bool
             default_value: true
-          model: 
+            description: >
+              Use the costmap robot radius for the circular footprint instead of the polygon given in
+              model/points. Consumed by: TEBController::configure (Footprint).
+          model:
             type: string
             default_value: ""
-          points: 
+            description: >
+              Footprint model: 'polygon' or 'circle'. Consumed by: TEBController::configure (Footprint).
+          points:
             type: string
             default_value: ""
+            description: >
+              Footprint polygon points as 'x1,y1;x2,y2;...' (used when model='polygon'), converted to
+              a circle set via scripts/footprint_polygon_to_circles.py. Consumed by:
+              TEBController::configure (Footprint).
 
-      robot_model: 
+      robot_model:
         type: string
         default_value: "diff_drive"
-        description: "Robot kinematic model: diff_drive or ackermann (car-like / bicycle)"
+        description: >
+          Robot kinematic model: 'diff_drive' or 'ackermann' (car-like/bicycle driving). Selects the
+          kinematics edge and Ackermann-specific edges. Consumed by: DiscreteTEBPlanner::buildGraph.
         read_only: true
         validation:
           one_of<>: [["diff_drive", "ackermann"]]
@@ -94,121 +159,151 @@ teb_controller:
       wheelbase:
         type: double
         default_value: 1.055
-        description: "Wheelbase L in meters. Used by the ackermann (car-like) model and steering-rate edges."
+        description: >
+          Wheelbase L [m] for the ackermann (car-like) model: steering-rate/steering-angle edges and
+          the steering-angle saturation. Consumed by: EdgeSteeringRate*, EdgeStartSteeringAngle,
+          saturateSteeringAngle.
         validation:
           bounds<>: [0.1, 10.0]
 
       v_max_x:
         type: double
         default_value: 0.5
-        description: "Maximum linear velocity m/s"
+        description: >
+          Maximum forward linear velocity [m/s]. Consumed by: EdgeVelocity*/EdgeVelocityHolonomic
+          and saturateVelocity (also speed-limit scaled).
         validation:
           bounds<>: [0.0, 10.0]
 
       v_max_x_backwards:
         type: double
         default_value: 0.0
-        description: "Maximum reverse velocity m/s. 0 disables reverse."
+        description: >
+          Maximum backward (reverse) linear velocity [m/s]; 0 disables reverse motion. Consumed by:
+          EdgeVelocity* (forward-drive) and saturateVelocity.
         validation:
           bounds<>: [0.0, 10.0]
 
       v_max_y:
         type: double
         default_value: 0.5
-        description: "Maximum linear velocity m/s"
+        description: >
+          Maximum lateral linear velocity [m/s]. Values > 0 switch the planner into holonomic mode
+          (3-DOF velocity/acceleration edges). Consumed by: buildGraph (holonomic switch),
+          EdgeVelocityHolonomic, EdgeAccelerationHolonomic*, saturateVelocity.
         validation:
           bounds<>: [0.0, 10.0]
 
       v_max_theta:
         type: double
         default_value: 0.0
-        description: "Maximum omega velocity rad/s."
+        description: >
+          Maximum angular velocity [rad/s]. Consumed by: EdgeVelocity* and saturateVelocity.
         validation:
           bounds<>: [0.0, 10.0]
 
       a_max_x:
         type: double
         default_value: 0.25
-        description: "Maximum linear acceleration m/s²"
+        description: >
+          Maximum linear acceleration [m/s²]. Consumed by: EdgeAcceleration{Start,Goal}.
         validation:
           bounds<>: [0.0, 10.0]
 
       a_max_y:
         type: double
         default_value: 0.0
-        description: "Maximum reverse deceleration m/s²"
+        description: >
+          Maximum lateral acceleration [m/s²] (holonomic mode only). Consumed by:
+          EdgeAccelerationHolonomic{Start,Goal}.
         validation:
           bounds<>: [0.0, 10.0]
 
       a_max_theta:
         type: double
         default_value: 0.0
-        description: "Maximum reverse deceleration m/s²"
+        description: >
+          Maximum angular acceleration [rad/s²]. Consumed by: EdgeAcceleration{Start,Goal}.
         validation:
           bounds<>: [0.0, 10.0]
 
       jerk_max_x:
         type: double
         default_value: 2.0
-        description: "Maximum jerk m/s³"
+        description: >
+          Maximum linear jerk [m/s³]. Consumed by: EdgeJerk{Start,Goal}.
         validation:
           bounds<>: [0.0, 100.0]
 
       jerk_max_y:
         type: double
         default_value: 2.0
-        description: "Maximum jerk m/s³"
+        description: >
+          Maximum lateral jerk [m/s³].
         validation:
           bounds<>: [0.0, 100.0]
 
       jerk_max_theta:
         type: double
         default_value: 2.0
-        description: "Maximum jerk m/s³"
+        description: >
+          Maximum angular jerk [rad/s³]. Consumed by: EdgeJerk{Start,Goal}.
         validation:
           bounds<>: [0.0, 100.0]
 
       snap_max_x:
         type: double
         default_value: 0.0
-        description: "Max"
+        description: >
+          Maximum linear snap [m/s⁴] (4th derivative, edge snap). Consumed by: EdgeSnap.
         validation:
           bounds<>: [0.0, 1000.0]
 
       snap_max_theta:
         type: double
         default_value: 0.0
-        description: "Max"
+        description: >
+          Maximum angular snap [rad/s⁴] (G4). Consumed by: EdgeSnap.
         validation:
           bounds<>: [0.0, 1000.0]
 
       steering_rate_max:
         type: double
         default_value: 0.5
-        description: "Maximum steering rate rad/s. Bicycle model only."
+        description: >
+          Maximum steering rate [rad/s] (ackermann / car-like). Consumed by:
+          EdgeSteeringRate{Start,Goal}, EdgeStartSteeringAngle, saturateSteeringAngle.
         validation:
           bounds<>: [0.0, 10.0]
 
       min_turning_radius:
         type: double
         default_value: 0.5
-        description: "Minimum turning radius R_min in meters"
+        description: >
+          Minimum turning radius R_min [m] (ackermann / car-like). Consumed by: EdgeKinematicsCarlike.
         validation:
           bounds<>: [0.0, 100.0]
 
       has_steering:
         type: bool
         default_value: true
+        description: >
+          Reserved for a future steering-aware mode.
 
       use_proportional_saturation:
         type: bool
         default_value: true
+        description: >
+          Use proportional velocity saturation (all components scaled down when one exceeds its limit)
+          instead of hard clamping. Consumed by: saturateVelocity.
 
     optimizer:
       optimizer_backend:
         type: string
         default_value: "g2o"
-        description: "Optimization backend: g2o or ceres"
+        description: >
+          Optimization backend selector. Only 'g2o' is implemented; this parameter is currently NOT
+          read by the code (kept in the schema for compatibility).
         read_only: true
         validation:
           one_of<>: [["g2o", "ceres"]]
@@ -216,7 +311,9 @@ teb_controller:
       solver:
         type: string
         default_value: "eigen"
-        description: "Optimization solver: cholmod, eigen, csparse, dense"
+        description: >
+          g2o linear solver backend: cholmod, eigen, csparse or dense. Consumed by:
+          DiscreteTEBPlanner (SparseOptimizer setup).
         read_only: true
         validation:
           one_of<>: [["cholmod", "eigen", "csparse", "dense"]]
@@ -224,7 +321,9 @@ teb_controller:
       algorithm:
         type: string
         default_value: "gauss_newton"
-        description: "Optimization algorithm: gauss_newton or levenberg_marquardt"
+        description: >
+          g2o iteration algorithm: gauss_newton or levenberg_marquardt. Consumed by:
+          DiscreteTEBPlanner (SparseOptimizer setup).
         read_only: true
         validation:
           one_of<>: [["gauss_newton", "levenberg_marquardt"]]
@@ -232,241 +331,312 @@ teb_controller:
       activate:
         type: bool
         default_value: true
+        description: >
+          Enable trajectory optimization at all; if false, optimizeTEB() returns without optimizing
+          the band. Consumed by: DiscreteTEBPlanner::optimizeTEB.
 
       fast_mode:
         type: bool
         default_value: true
+        description: >
+          Require a minimum time difference when inserting poses (autoResize fast mode); avoids
+          inserting too many poses near the start. Consumed by: autoResize.
 
       exact_arc_length:
         type: bool
         default_value: true
-        
-      optimizer_backend:
-        type: string
-        default_value: "g2o"
-        description: "Optimization backend: g2o or ceres"
-        read_only: true
-        validation:
-          one_of<>: [["g2o", "ceres"]]
+        description: >
+          Use exact arc-length velocities instead of the linearized difference-quotient approximation
+          in the edges that support it. Consumed by: EdgeSteeringRate*, EdgeKinematicsCarlike,
+          EdgeG3Continuity.
 
       no_inner_iterations:
         type: int
         default_value: 100
-        description: "Maximum number of optimizer iterations per cycle"
+        description: >
+          Maximum number of inner iterations per optimization call; together with no_outer_iterations
+          split equally across the 3 optimization phases. Consumed by: DiscreteTEBPlanner::optimizeTEB.
         validation:
           bounds<>: [1, 1000]
 
       no_outer_iterations:
         type: int
         default_value: 100
-        description: "Maximum number of optimizer iterations per cycle"
+        description: >
+          Maximum number of outer iterations per optimization call; together with no_inner_iterations
+          split equally across the 3 optimization phases. Consumed by: DiscreteTEBPlanner::optimizeTEB.
         validation:
           bounds<>: [1, 1000]
 
       penalty_epsilon:
         type: double
         default_value: 0.1
-        description: "Buffer zone before constraint boundary for penalty functions"
+        description: >
+          Buffer [s] before a constraint boundary within which the linear penalty ramps up to the
+          weight. Consumed by: all penalty-based edges (penalties.h).
         validation:
           bounds<>: [0.0, 1.0]
 
       fix_goal:
         type: bool
         default_value: true
+        description: >
+          Fix the goal pose vertex (position and orientation cannot be optimized). Consumed by:
+          buildGraph (goal vertex).
 
       free_goal_vel:
         type: bool
         default_value: false
-        description: "If true, do not enforce v=0 and delta=0 at goal"
+        description: >
+          If true, do not enforce v=0 and angular velocity=0 at the goal (velocity is free at the
+          goal). Consumed by: buildGraph (vel_goal_ flag) and the goal velocity edges.
 
       verbose:
         type: bool
         default_value: false
+        description: >
+          Print per-phase optimization statistics and costs. Consumed by:
+          DiscreteTEBPlanner::optimizeTEB (logging).
 
       stepwise_optimization:
         type: bool
         default_value: true
-        description: "Enable 3-phase optimization: obstacles+base → kinodynamics → efficiency"
+        description: >
+          Enable the 3-phase optimization (1: obstacles+G3+kinematics, 2: kinodynamics, 3: efficiency
+          edges) instead of a single full pass. Consumed by: DiscreteTEBPlanner::optimizeTEB.
 
       divergence_detection_enable:
         type: bool
         default_value: false
+        description: >
+          Enable divergence detection (chi², violation rate and path length) with band re-initialization
+          on failure. Consumed by: DiscreteTEBPlanner::optimizeTEB.
 
       divergence_detection_max_chi_squared:
         type: double
         default_value: 10.0
+        description: >
+          Maximum per-iteration chi² before the optimization is flagged as divergent. Consumed by:
+          divergence detection in optimizeTEB.
 
       divergence_detection_max_chi_violation_rate:
         type: double
         default_value: 0.5
+        description: >
+          Maximum allowed fraction of iterations with an increasing chi² before the optimization is
+          flagged as divergent. Consumed by: divergence detection in optimizeTEB.
 
       divergence_detection_max_path_length_factor:
         type: double
         default_value: 3.0
+        description: >
+          Maximum factor of path length growth relative to the initial band before the optimization is
+          flagged as divergent. Consumed by: divergence detection in optimizeTEB.
 
     weights:
       weight_adapt_factor:
         type: double
         default_value: 1.0
+        description: >
+          Factor that ramps up the obstacle weights over the outer iterations (weight multiplier).
+          Consumed by: DiscreteTEBPlanner::optimizeTEB.
 
       weight_time_optimal:
         type: double
         default_value: 1.0
-        description: "Weight for time-optimal edge: minimize sum(T_i)"
+        description: >
+          Weight of the time-optimality objective pushing the sum of time intervals ΣT_i towards 0,
+          i.e. executing the band as fast as possible. Consumed by: EdgeTimeOptimal.
         validation:
           bounds<>: [0.0, 1000.0]
 
       weight_shortest_path:
         type: double
         default_value: 1.0
-        description: "Weight"
+        description: >
+          Weight of the path-length objective pulling the band towards the shortest connection of the
+          poses. Consumed by: EdgeShortestPath — and note EdgePathSmoothness is wired with this weight
+          as well (weight_path_smoothness is currently unused).
         validation:
           bounds<>: [0.0, 1000.0]
 
       weight_path_smoothness:
         type: double
         default_value: 1.0
-        description: "Weight"
+        description: >
+          Weight of the path-smoothing edge (EdgePathSmoothness).
         validation:
           bounds<>: [0.0, 1000.0]
 
       weight_v_max_x:
         type: double
         default_value: 1.0
-        description: "Weight"
+        description: >
+          Weight of the maximum linear velocity constraint (x). Consumed by:
+          EdgeVelocity/EdgeVelocityHolonomic.
         validation:
           bounds<>: [0.0, 1000.0]
 
       weight_v_max_y:
         type: double
         default_value: 1.0
-        description: "Weight"
+        description: >
+          Weight of the maximum lateral velocity constraint (y, holonomic mode). Consumed by:
+          EdgeVelocityHolonomic.
         validation:
           bounds<>: [0.0, 1000.0]
 
       weight_v_max_theta:
         type: double
         default_value: 1.0
-        description: "Weight"
+        description: >
+          Weight of the maximum angular velocity constraint. Consumed by: EdgeVelocity*.
         validation:
           bounds<>: [0.0, 1000.0]
 
       weight_a_max_x:
         type: double
         default_value: 1.0
-        description: "Weight"
+        description: >
+          Weight of the maximum linear acceleration constraint. Consumed by:
+          EdgeAcceleration{Start,Goal}.
         validation:
           bounds<>: [0.0, 1000.0]
 
       weight_jerk_max_x:
         type: double
         default_value: 1.0
-        description: "Weight"
+        description: >
+          Weight of the maximum linear jerk constraint. Consumed by: EdgeJerk{Start,Goal}.
         validation:
           bounds<>: [0.0, 1000.0]
 
       weight_jerk_max_theta:
         type: double
         default_value: 1.0
-        description: "Weight"
+        description: >
+          Weight of the maximum angular jerk constraint. Consumed by: EdgeJerk{Start,Goal}.
         validation:
           bounds<>: [0.0, 1000.0]
 
       weight_snap_max_x:
         type: double
         default_value: 1.0
-        description: "Weight"
+        description: >
+          Weight of the maximum linear snap constraint (G4). Consumed by: EdgeSnap.
         validation:
           bounds<>: [0.0, 1000.0]
 
       weight_snap_max_theta:
         type: double
         default_value: 1.0
-        description: "Weight"
+        description: >
+          Weight of the maximum angular snap constraint (G4). Consumed by: EdgeSnap.
         validation:
           bounds<>: [0.0, 1000.0]
 
       weight_a_max_y:
         type: double
         default_value: 1.0
-        description: "Weight"
+        description: >
+          Weight of the maximum lateral acceleration constraint (holonomic only). Consumed by:
+          EdgeAccelerationHolonomic{Start,Goal}.
         validation:
           bounds<>: [0.0, 1000.0]
 
       weight_a_max_theta:
         type: double
         default_value: 1.0
-        description: "Weight"
+        description: >
+          Weight of the maximum angular acceleration constraint. Consumed by:
+          EdgeAcceleration{Start,Goal}.
         validation:
           bounds<>: [0.0, 1000.0]
 
       weight_kinematics_nh:
         type: double
         default_value: 1.0
-        description: "Weight"
+        description: >
+          Weight of the non-holonomic (driving) kinematics constraint. Consumed by:
+          EdgeKinematics{2D,3D} (nonholonomic part).
         validation:
           bounds<>: [0.0, 100000.0]
 
       weight_kinematics_forward_drive:
         type: double
         default_value: 1.0
-        description: "Weight"
+        description: >
+          Weight penalizing backward motion of a diff-drive robot (forward-drive objective). Consumed
+          by: EdgeKinematicsDiffDrive.
         validation:
           bounds<>: [0.0, 1000.0]
 
       weight_kinematics_turning_radius:
         type: double
         default_value: 1.0
-        description: "Weight"
+        description: >
+          Weight of the minimum turning radius constraint (ackermann / car-like). Consumed by:
+          EdgeKinematicsCarlike.
         validation:
           bounds<>: [0.0, 1000.0]
 
       weight_max_steering_rate:
         type: double
         default_value: 1.0
-        description: "Weight"
+        description: >
+          Weight of the maximum steering rate constraint. Consumed by: EdgeSteeringRate{Start,Goal}.
         validation:
           bounds<>: [0.0, 1000.0]
 
       weight_zero_steering_angle_goal:
         type: double
         default_value: 1.0
-        description: "Weight"
+        description: >
+          Weight driving the steering angle to zero at the goal. Consumed by: EdgeSteeringAngleGoal.
         validation:
           bounds<>: [0.0, 1000.0]
 
       weight_start_steering_angle:
         type: double
         default_value: 1.0
-        description: "Weight"
+        description: >
+          Weight keeping the start pose steering angle equal to the measured feedback angle. Consumed
+          by: EdgeStartSteeringAngle.
         validation:
           bounds<>: [0.0, 1000.0]
 
       weight_goal_angular_vel_zero:
         type: double
         default_value: 1.0
-        description: "Weight"
+        description: >
+          Weight driving the angular velocity to zero at the goal. Consumed by:
+          EdgeGoalAngularVelocityZero.
         validation:
           bounds<>: [0.0, 1000.0]
 
       weight_g3_continuity:
         type: double
         default_value: 1.0
-        description: "Weight"
+        description: >
+          Weight of the G3 continuity edge (bounded change of curvature/steering rate along the band).
+          Consumed by: EdgeG3Continuity.
         validation:
           bounds<>: [0.0, 1000.0]
 
       weight_obstacle:
         type: double
         default_value: 50.0
-        description: "Weight for obstacle avoidance edge"
+        description: >
+          Weight of the ESDF obstacle avoidance per footprint circle. Consumed by: EdgeESDFObstacle.
         validation:
           bounds<>: [0.0, 1000.0]
 
       weight_inflation:
         type: double
         default_value: 50.0
-        description: "Weight for obstacle avoidance edge"
+        description: >
+          Weight of the ESDF inflation term (pushes the band center out of the inflated obstacle area).
+          Consumed by: EdgeESDFObstacle.
         validation:
           bounds<>: [0.0, 1000.0]
 
@@ -474,58 +644,94 @@ teb_controller:
       include_dynamic_obstacles:
         type: bool
         default_value: false
-        
+        description: >
+          Include dynamic obstacles in the obstacle container. Reserved — not implemented,
+          currently unused.
+
       legacy_obstacle_association:
         type: bool
         default_value: false
+        description: >
+          Use the legacy costmap cost association for obstacles.
 
       feasibility_check:
         type: double
         default_value: 1.0
+        description: >
+          Lookahead distance [m] along the band that is checked for collisions with the ESDF plus
+          footprint. On collision a stop command is issued. Consumed by:
+          TEBController::computeVelocityCommands (checkFeasibility).
 
       min_obstacle_cost:
         type: int
         default_value: 128
+        description: >
+          Legacy obstacle cost threshold (costmap obstacle association).
 
       inflation_dist:
         type: double
         default_value: 1.9
+        description: >
+          Distance [m] around obstacles within which the obstacle potential applies (inflated area).
+          Consumed by: EdgeESDFObstacle (inflation term).
 
       min_obstacle_dist:
         type: double
         default_value: 0.1
+        description: >
+          Desired minimum distance [m] between the robot contour and the obstacles. Consumed by:
+          EdgeESDFObstacle (distance cost and gradient).
 
       cutoff_dist:
         type: double
         default_value: 1.0
+        description: >
+          Distance [m] above which the ESDF obstacle gradient is cut off (buffer for the cost
+          function). Consumed by: EdgeESDFObstacle.
 
       cost_exponent:
         type: double
         default_value: 2.0
-        
-      costmap_converter_plugin: 
+        description: >
+          Exponent of the obstacle cost function (1/d^cost_exponent). Consumed by: EdgeESDFObstacle.
+
+      costmap_converter_plugin:
         type: string
         default_value: ""
+        description: >
+          Plugin name for the costmap→obstacle-polygon conversion (e.g.
+          costmap_converter::CostmapToPolygonsDBSMCCH). Consumed by: TEBController::initCostmapConverter.
 
       costmap_converter_rate:
         type: double
         default_value: 1.0
+        description: >
+          Rate [Hz] at which the ESDF is re-computed from the costmap. Consumed by:
+          TEBController::computeVelocityCommands (ESDF update throttling).
 
       costmap_converter_spin_thread:
         type: bool
         default_value: true
+        description: >
+          Run the costmap conversion in a separate thread. Consumed by:
+          TEBController::initCostmapConverter.
 
     recovery:
       activate:
         type: bool
         default_value: false
-        description: "activate recovery modes"
+        description: >
+          Activate recovery behaviors (planned feature).
+
       divergence_detection_enable:
         type: bool
         default_value: false
+        description: >
+          Enable recovery handling on divergence.
 
     visualization:
       activate:
         type: bool
         default_value: false
-        description: "Publish markers"
+        description: >
+          Publish visualization markers.
