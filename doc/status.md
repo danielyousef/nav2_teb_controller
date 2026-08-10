@@ -62,6 +62,11 @@ project-state details live.
   (both in phase Full) — likely a bug, the smoothness weight param is dead.
 - `EdgeESDFObstacle` skips pose 0 and last pose (`for i in [1, n-2]`); start pose is also overwritten with the
   true robot pose before planning.
+- **Tail exclusion**: obstacle edges are skipped for poses within `s_excl =
+  max(2·v_max_x/max_vel_theta, circum_radius + min_obstacle_dist)` of the band end — the tail cannot bend
+  around obstacles (goal/anchor fixed) and only produced kinks/false divergence. If the whole band is shorter
+  than `s_excl`, no obstacle edges are added at all (only the `checkFeasibility` hard stop).
+  `addEdgesESDFObstacles` in `src/planner/optimal_planner.cpp`.
 - `checkFeasibility` returns the first colliding pose index; `stop_cmd` only gates the path tracker output,
   the planner still runs.
 - Steering feedback (`/tricycle_state`, ackermann msg) is used as initial steering angle for

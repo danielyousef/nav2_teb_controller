@@ -914,9 +914,22 @@ void DiscreteTEBPlanner::addEdgesESDFObstacles() {
     information(i, i) = weight_obstacle * weight_multiplier_;
   information(dim - 1, dim - 1) = weight_inflation;
 
+  // Tail exclusion: poses within s_excl [m] of the band end cannot bend around obstacles
+  // (goal/anchor is fixed, too few free poses left to develop a curve). Derived from the
+  // dynamics radius (v_max_x / max_vel_theta), floored by footprint size + clearance.
+  const double v_max_x = params_.FollowPath.robot.v_max_x;
+  const double w_max = params_.FollowPath.robot.v_max_theta;
+  const double s_excl = std::max(2.0 * v_max_x / std::max(w_max, 1e-6), circum_radius + min_dist);
+  const double total_arc = teb_.accumulatedDistance();
+  double arc = 0.0;
+
   for (std::size_t i = 1; i < teb_.sizePoses() - 1; ++i) {
-    // Skip far obstacles
     const Eigen::Vector2d &pos = teb_.pose(i).position();
+    arc += (pos - teb_.pose(i - 1).position()).norm();
+    if (total_arc - arc < s_excl)
+      break;  // tail: not enough track left to bend around obstacles
+
+    // Skip far obstacles
     if (esdf_->query(pos.x(), pos.y()).distance > cutoff)
       continue;
 
