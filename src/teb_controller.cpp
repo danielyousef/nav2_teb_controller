@@ -1,7 +1,8 @@
 #include "nav2_teb_controller/teb_controller.hpp"
-#include "nav2_teb_controller/teb_profiler.hpp"
 
 #include <memory>
+
+#include "nav2_teb_controller/teb_profiler.hpp"
 
 namespace nav2_teb_controller {
 
@@ -141,9 +142,9 @@ geometry_msgs::msg::TwistStamped TEBController::computeVelocityCommands(
   {
     PROFILE_BLOCK("prune_trim");
     pruneGlobalPlan(*tf_, pose, global_plan_, prune_dist);
-    transformed_plan = transformAndTrimPlan(
-        *tf_, global_plan_, pose, *costmap_ros_->getCostmap(), costmap_ros_->getGlobalFrameID(),
-        clock_->now(), path_length, &goal_idx);
+    transformed_plan = transformAndTrimPlan(*tf_, global_plan_, pose, *costmap_ros_->getCostmap(),
+                                            costmap_ros_->getGlobalFrameID(), clock_->now(),
+                                            path_length, &goal_idx);
 
     if (transformed_plan.poses.empty()) {
       RCLCPP_INFO(logger_, "TEBController: Empty plan.");
@@ -185,8 +186,8 @@ geometry_msgs::msg::TwistStamped TEBController::computeVelocityCommands(
   bool success;
   {
     PROFILE_BLOCK("planner_plan");
-    bool final_goal =
-        (goal_idx == ((int)global_plan_.poses.size() - 1)) || params_.FollowPath.optimizer.fix_goal;
+    bool final_goal = (goal_idx == ((int)global_plan_.poses.size() - 1)) ||
+                      params_.FollowPath.optimizer.fix_goal;
     teb_planner_->setFixedGoal(final_goal);
     teb_planner_->setFeedback(last_ackermann_cmd_.drive);
     success = planner_->plan(transformed_plan, velocity);
@@ -238,7 +239,8 @@ geometry_msgs::msg::TwistStamped TEBController::computeVelocityCommands(
       const double v_max_x_backwards = params_.FollowPath.robot.v_max_x_backwards;
       const double steering_rate_max = params_.FollowPath.robot.steering_rate_max;
       const double wheelbase = params_.FollowPath.robot.wheelbase;
-      const bool use_proportional_saturation = params_.FollowPath.robot.use_proportional_saturation;
+      const bool use_proportional_saturation =
+          params_.FollowPath.robot.use_proportional_saturation;
       double current_angle = last_ackermann_cmd_.drive.steering_angle;
       saturateVelocity(cmd_vel.twist, v_max_x, v_max_y, v_max_theta, v_max_x_backwards,
                        use_proportional_saturation);

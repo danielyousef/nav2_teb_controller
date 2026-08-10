@@ -1,7 +1,8 @@
 #include "nav2_teb_controller/planner/optimal_planner.hpp"
-#include "nav2_teb_controller/teb_profiler.hpp"
 
 #include <algorithm>
+
+#include "nav2_teb_controller/teb_profiler.hpp"
 
 namespace nav2_teb_controller {
 
