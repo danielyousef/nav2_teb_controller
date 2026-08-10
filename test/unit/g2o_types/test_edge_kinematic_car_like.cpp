@@ -4,6 +4,7 @@
 
 #include "nav2_teb_controller/g2o_types/edge_kinematic_car_like.h"
 #include "nav2_teb_controller/g2o_types/vertex_pose.h"
+#include "test_jacobian_utils.hpp"
 
 using namespace nav2_teb_controller;
 
@@ -96,6 +97,29 @@ TEST(EdgeKinematicsCarlike, WideTurnZeroError) {
   delete p1;
 }
 
+
+// Analytic Jacobian vs finite differences. Both rows active: non-holonomic
+// bracket != 0 and turning radius 2.04 < min_turning_radius 2.5.
+TEST(EdgeKinematicsCarlike, JacobianMatchesNumeric) {
+  auto params = makeParams(false);
+  params.FollowPath.robot.min_turning_radius = 2.5;
+
+  VertexPose *p0 = new VertexPose();
+  p0->setEstimate(PoseSE2(0, 0, 0.1));
+  VertexPose *p1 = new VertexPose();
+  p1->setEstimate(PoseSE2(0.5, 0.1, 0.35));
+
+  EdgeKinematicsCarlike edge;
+  edge.setVertex(0, p0);
+  edge.setVertex(1, p1);
+  edge.setTebConfig(params);
+  edge.computeError();
+
+  expectAnalyticJacobianMatchesNumericBinary(edge);
+
+  delete p0;
+  delete p1;
+}
 int main(int argc, char **argv) {
   testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();

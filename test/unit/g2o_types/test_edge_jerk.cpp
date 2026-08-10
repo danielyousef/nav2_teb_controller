@@ -7,6 +7,7 @@
 #include "nav2_teb_controller/g2o_types/vertex_pose.h"
 #include "nav2_teb_controller/g2o_types/vertex_timediff.h"
 #include "nav2_teb_controller/math_utils.hpp"
+#include "test_jacobian_utils.hpp"
 
 using namespace nav2_teb_controller;
 

@@ -6,6 +6,7 @@
 #include "nav2_teb_controller/g2o_types/edge_start_steering_angle.h"
 #include "nav2_teb_controller/g2o_types/vertex_pose.h"
 #include "nav2_teb_controller/g2o_types/vertex_timediff.h"
+#include "test_jacobian_utils.hpp"
 #include "nav2_teb_controller/math_utils.hpp"
 
 using namespace nav2_teb_controller;
@@ -93,6 +94,40 @@ TEST(EdgeStartSteeringAngle, HighRequiredRatePenalized) {
   delete dt1;
 }
 
+
+// Analytic Jacobian vs finite differences. v = 2, omega = 0.2 -> steering cmd
+// 0.105, r = 0.21: penalty active (|r| + eps > steering_rate_max), no 180 deg
+// branch flip, main atan2 branch (|v| >> 0), error row 1 identically zero.
+TEST(EdgeStartSteeringAngle, JacobianMatchesNumeric) {
+  auto params = makeParams();
+
+  VertexPose *p0 = new VertexPose();
+  p0->setEstimate(PoseSE2(0, 0, 0));
+  VertexPose *p1 = new VertexPose();
+  p1->setEstimate(PoseSE2(1.0, 0, 0.1));
+  VertexPose *p2 = new VertexPose();
+  p2->setEstimate(PoseSE2(2.0, 0, 0.2));
+  VertexTimeDiff *dt0 = new VertexTimeDiff(0.5);
+  VertexTimeDiff *dt1 = new VertexTimeDiff(0.5);
+
+  EdgeStartSteeringAngle edge;
+  edge.setInitialSteeringAngle(0.0);
+  edge.setVertex(0, p0);
+  edge.setVertex(1, p1);
+  edge.setVertex(2, p2);
+  edge.setVertex(3, dt0);
+  edge.setVertex(4, dt1);
+  edge.setTebConfig(params);
+  edge.computeError();
+
+  expectAnalyticJacobianMatchesNumericMulti(edge);
+
+  delete p0;
+  delete p1;
+  delete p2;
+  delete dt0;
+  delete dt1;
+}
 int main(int argc, char **argv) {
   testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();

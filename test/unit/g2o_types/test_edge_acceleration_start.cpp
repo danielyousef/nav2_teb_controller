@@ -7,6 +7,7 @@
 #include "nav2_teb_controller/g2o_types/vertex_pose.h"
 #include "nav2_teb_controller/g2o_types/vertex_timediff.h"
 #include "nav2_teb_controller/math_utils.hpp"
+#include "test_jacobian_utils.hpp"
 
 using namespace nav2_teb_controller;
 
@@ -79,6 +80,37 @@ TEST(EdgeAccelerationStart, HighInitialAccelerationPenalized) {
   const double vel2 = (2.0 / 0.5) * fast_sigmoid(100.0 * 2.0);
   const double acc = vel2 / 0.5;
   EXPECT_NEAR(edge.error()[0], acc - 0.9, 1e-9);
+
+  delete p1;
+  delete p2;
+  delete dt;
+}
+
+
+// Analytic Jacobian vs finite differences. acc_lin = (vel2 - vel_start)/dt =
+// 3.6 > a_max_x - eps and acc_rot = 1.2 > a_max_theta - eps (both active).
+TEST(EdgeAccelerationStart, JacobianMatchesNumeric) {
+  auto params = makeParams();
+
+  geometry_msgs::msg::Twist vel_start;
+  vel_start.linear.x = 0.2;
+  vel_start.angular.z = -0.2;
+
+  VertexPose *p1 = new VertexPose();
+  p1->setEstimate(PoseSE2(0, 0, 0));
+  VertexPose *p2 = new VertexPose();
+  p2->setEstimate(PoseSE2(1.0, 0, 0.2));
+  VertexTimeDiff *dt = new VertexTimeDiff(0.5);
+
+  EdgeAccelerationStart edge;
+  edge.setInitialVelocity(vel_start);
+  edge.setVertex(0, p1);
+  edge.setVertex(1, p2);
+  edge.setVertex(2, dt);
+  edge.setTebConfig(params);
+  edge.computeError();
+
+  expectAnalyticJacobianMatchesNumericMulti(edge);
 
   delete p1;
   delete p2;

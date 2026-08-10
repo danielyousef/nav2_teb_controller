@@ -4,6 +4,7 @@
 
 #include "nav2_teb_controller/g2o_types/edge_kinematics_diff.h"
 #include "nav2_teb_controller/g2o_types/vertex_pose.h"
+#include "test_jacobian_utils.hpp"
 
 using namespace nav2_teb_controller;
 
@@ -90,6 +91,28 @@ TEST(EdgeKinematicsDiffDrive, LateralMotionNonHolonomicViolation) {
   delete p1;
 }
 
+
+// Analytic Jacobian vs finite differences. Both rows active: non-holonomic
+// bracket = 0.539 != 0, forward-drive dot < 0 (penalized).
+TEST(EdgeKinematicsDiffDrive, JacobianMatchesNumeric) {
+  auto params = makeParams();
+
+  VertexPose *p0 = new VertexPose();
+  p0->setEstimate(PoseSE2(0, 0, 0.1));
+  VertexPose *p1 = new VertexPose();
+  p1->setEstimate(PoseSE2(-1, 0.05, 0.15));
+
+  EdgeKinematicsDiffDrive edge;
+  edge.setVertex(0, p0);
+  edge.setVertex(1, p1);
+  edge.setTebConfig(params);
+  edge.computeError();
+
+  expectAnalyticJacobianMatchesNumericBinary(edge);
+
+  delete p0;
+  delete p1;
+}
 int main(int argc, char **argv) {
   testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();

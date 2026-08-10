@@ -2,6 +2,7 @@
 
 #include "nav2_teb_controller/g2o_types/edge_time_optimal.h"
 #include "nav2_teb_controller/g2o_types/vertex_timediff.h"
+#include "test_jacobian_utils.hpp"
 
 using namespace nav2_teb_controller;
 
@@ -49,6 +50,18 @@ TEST(EdgeTimeOptimal, NegativeDtPropagates) {
   edge.computeError();
 
   EXPECT_DOUBLE_EQ(edge.error()[0], -0.1);
+
+  delete v;
+}
+
+// Analytic Jacobian vs finite differences: error = dt is linear, J = 1.
+TEST(EdgeTimeOptimal, JacobianMatchesNumeric) {
+  EdgeTimeOptimal edge;
+  VertexTimeDiff *v = new VertexTimeDiff(1.5);
+  edge.setVertex(0, v);
+  edge.computeError();
+
+  expectAnalyticJacobianMatchesNumericUnary(edge);
 
   delete v;
 }

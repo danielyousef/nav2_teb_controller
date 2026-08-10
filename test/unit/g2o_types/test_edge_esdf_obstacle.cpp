@@ -6,6 +6,7 @@
 #include "nav2_teb_controller/g2o_types/vertex_pose.h"
 #include "nav2_teb_controller/obstacles/esdf.hpp"
 #include "nav2_teb_controller/core/footprint.hpp"
+#include "test_jacobian_utils.hpp"
 
 using namespace nav2_teb_controller;
 
@@ -151,6 +152,30 @@ TEST(EdgeESDFObstacle, NearObstaclePartialPenalty) {
   delete v;
 }
 
+
+// Analytic Jacobian vs finite differences. Pose at (0.8, 1.0): bilinear
+// interpolation cell (distance ~0.15 < thresholds, both penalties active),
+// 0.05 m away from interpolation cell boundaries, gradient smooth.
+TEST(EdgeESDFObstacle, JacobianMatchesNumeric) {
+  auto esdf = makeEsdf();
+  Footprint fp(false, "circles", "[ [0, 0, 0.1] ]");
+  auto params = makeParams();
+
+  VertexPose *v = new VertexPose();
+  v->setEstimate(PoseSE2(0.8, 1.0, 0.3));
+
+  EdgeESDFObstacle edge;
+  edge.resize(fp.circles().size());
+  edge.setVertex(0, v);
+  edge.setObstacle(esdf);
+  edge.setFootprint(fp);
+  edge.setTebConfig(params);
+  edge.computeError();
+
+  expectAnalyticJacobianMatchesNumericUnary(edge);
+
+  delete v;
+}
 int main(int argc, char **argv) {
   testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();

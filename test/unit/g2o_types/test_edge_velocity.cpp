@@ -6,6 +6,7 @@
 #include "nav2_teb_controller/g2o_types/vertex_pose.h"
 #include "nav2_teb_controller/g2o_types/vertex_timediff.h"
 #include "nav2_teb_controller/math_utils.hpp"
+#include "test_jacobian_utils.hpp"
 
 using namespace nav2_teb_controller;
 
@@ -119,6 +120,32 @@ TEST(EdgeVelocity, HighOmegaPenalized) {
   const double omega = 1.5 / 0.5;
   // penaltyBoundToInterval(omega, 1.0, 0.1): omega > 1.0-0.1 -> omega - 0.9
   EXPECT_NEAR(edge.error()[1], omega - 0.9, 1e-9);
+
+  delete p0;
+  delete p1;
+  delete dt;
+}
+
+// Analytic Jacobian vs finite differences. Both error components active:
+// v = 2 m/s > v_max_x - eps and omega = 1.6 > v_max_theta - eps. Sigmoid
+// argument s_dir = 2 >> 0 (smooth), theta far from wrap boundaries.
+TEST(EdgeVelocity, JacobianMatchesNumeric) {
+  auto params = makeParams();
+
+  VertexPose *p0 = new VertexPose();
+  p0->setEstimate(PoseSE2(0, 0, 0));
+  VertexPose *p1 = new VertexPose();
+  p1->setEstimate(PoseSE2(1.0, 0, 0.8));
+  VertexTimeDiff *dt = new VertexTimeDiff(0.5);
+
+  EdgeVelocity edge;
+  edge.setVertex(0, p0);
+  edge.setVertex(1, p1);
+  edge.setVertex(2, dt);
+  edge.setTebConfig(params);
+  edge.computeError();
+
+  expectAnalyticJacobianMatchesNumericMulti(edge);
 
   delete p0;
   delete p1;

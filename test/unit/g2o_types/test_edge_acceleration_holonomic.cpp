@@ -5,6 +5,7 @@
 #include "nav2_teb_controller/g2o_types/edge_acceleration_holonomic.h"
 #include "nav2_teb_controller/g2o_types/vertex_pose.h"
 #include "nav2_teb_controller/g2o_types/vertex_timediff.h"
+#include "test_jacobian_utils.hpp"
 
 using namespace nav2_teb_controller;
 
@@ -80,6 +81,39 @@ TEST(EdgeAccelerationHolonomic, LateralAccelerationPenalized) {
   EXPECT_NEAR(edge.error()[0], 0.0, 1e-9);
   EXPECT_NEAR(edge.error()[1], 0.5 - 0.4, 1e-9);  // acc_y - (a_max_y - eps)
   EXPECT_NEAR(edge.error()[2], 0.0, 1e-9);
+
+  delete p1;
+  delete p2;
+  delete p3;
+  delete dt1;
+  delete dt2;
+}
+
+
+// Analytic Jacobian vs finite differences. Robot-frame accelerations
+// acc_x = 2.72 > a_max_x - eps, acc_y = 1.12 > a_max_y - eps (both active).
+TEST(EdgeAccelerationHolonomic, JacobianMatchesNumeric) {
+  auto params = makeParams();
+
+  VertexPose *p1 = new VertexPose();
+  p1->setEstimate(PoseSE2(0, 0, 0));
+  VertexPose *p2 = new VertexPose();
+  p2->setEstimate(PoseSE2(0.5, 0.5, 0.2));
+  VertexPose *p3 = new VertexPose();
+  p3->setEstimate(PoseSE2(1.5, 1.5, 0.4));
+  VertexTimeDiff *dt1 = new VertexTimeDiff(0.5);
+  VertexTimeDiff *dt2 = new VertexTimeDiff(0.5);
+
+  EdgeAccelerationHolonomic edge;
+  edge.setVertex(0, p1);
+  edge.setVertex(1, p2);
+  edge.setVertex(2, p3);
+  edge.setVertex(3, dt1);
+  edge.setVertex(4, dt2);
+  edge.setTebConfig(params);
+  edge.computeError();
+
+  expectAnalyticJacobianMatchesNumericMulti(edge);
 
   delete p1;
   delete p2;

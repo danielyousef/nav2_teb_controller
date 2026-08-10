@@ -6,6 +6,7 @@
 #include "nav2_teb_controller/g2o_types/edge_steering_rate.h"
 #include "nav2_teb_controller/g2o_types/vertex_pose.h"
 #include "nav2_teb_controller/g2o_types/vertex_timediff.h"
+#include "test_jacobian_utils.hpp"
 
 using namespace nav2_teb_controller;
 
@@ -121,6 +122,38 @@ TEST(EdgeSteeringRate, HighRatePenalized) {
   delete dt2;
 }
 
+
+// Analytic Jacobian vs finite differences. Steering rate 0.371 rad/s, active
+// (rate < steering_rate_max + eps), sign branches positive and stable.
+TEST(EdgeSteeringRate, JacobianMatchesNumeric) {
+  auto params = makeParams();
+
+  VertexPose *p1 = new VertexPose();
+  p1->setEstimate(PoseSE2(0, 0, 0));
+  VertexPose *p2 = new VertexPose();
+  p2->setEstimate(PoseSE2(0.5, 0.05, 0.1));
+  VertexPose *p3 = new VertexPose();
+  p3->setEstimate(PoseSE2(1.0, 0.15, 0.3));
+  VertexTimeDiff *dt1 = new VertexTimeDiff(0.5);
+  VertexTimeDiff *dt2 = new VertexTimeDiff(0.5);
+
+  EdgeSteeringRate edge;
+  edge.setVertex(0, p1);
+  edge.setVertex(1, p2);
+  edge.setVertex(2, p3);
+  edge.setVertex(3, dt1);
+  edge.setVertex(4, dt2);
+  edge.setTebConfig(params);
+  edge.computeError();
+
+  expectAnalyticJacobianMatchesNumericMulti(edge);
+
+  delete p1;
+  delete p2;
+  delete p3;
+  delete dt1;
+  delete dt2;
+}
 int main(int argc, char **argv) {
   testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();

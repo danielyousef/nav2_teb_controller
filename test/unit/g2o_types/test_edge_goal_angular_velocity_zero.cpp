@@ -7,6 +7,7 @@
 #include "nav2_teb_controller/g2o_types/edge_goal_angular_velocity_zero.h"
 #include "nav2_teb_controller/g2o_types/vertex_pose.h"
 #include "nav2_teb_controller/g2o_types/vertex_timediff.h"
+#include "test_jacobian_utils.hpp"
 
 using namespace nav2_teb_controller;
 
@@ -136,6 +137,53 @@ TEST(EdgeGoalAngularVelocityZero, RotatingTrajectoryPenalized) {
   delete dt4;
 }
 
+
+// Analytic Jacobian vs finite differences. Gentle arc: v ~ 0.92 m/s (above the
+// 1e-4 guard), non-trivial omega from the LSQ slope; all normalize_angle()
+// arguments of the theta recursion are >= 0.15 rad away from +/-pi.
+TEST(EdgeGoalAngularVelocityZero, JacobianMatchesNumeric) {
+  auto params = makeParams();
+
+  VertexPose *p1 = new VertexPose();
+  p1->setEstimate(PoseSE2(0.0, 0.0, 1.0));
+  VertexPose *p2 = new VertexPose();
+  p2->setEstimate(PoseSE2(0.8, 0.1, 1.2));
+  VertexPose *p3 = new VertexPose();
+  p3->setEstimate(PoseSE2(1.6, 0.4, 1.4));
+  VertexPose *p4 = new VertexPose();
+  p4->setEstimate(PoseSE2(2.4, 0.9, 1.6));
+  VertexPose *p5 = new VertexPose();
+  p5->setEstimate(PoseSE2(3.2, 1.6, 1.8));
+  VertexTimeDiff *dt1 = new VertexTimeDiff(1.0);
+  VertexTimeDiff *dt2 = new VertexTimeDiff(1.0);
+  VertexTimeDiff *dt3 = new VertexTimeDiff(1.0);
+  VertexTimeDiff *dt4 = new VertexTimeDiff(1.0);
+
+  EdgeGoalAngularVelocityZero edge;
+  edge.setVertex(0, p1);
+  edge.setVertex(1, p2);
+  edge.setVertex(2, p3);
+  edge.setVertex(3, p4);
+  edge.setVertex(4, p5);
+  edge.setVertex(5, dt1);
+  edge.setVertex(6, dt2);
+  edge.setVertex(7, dt3);
+  edge.setVertex(8, dt4);
+  edge.setTebConfig(params);
+  edge.computeError();
+
+  expectAnalyticJacobianMatchesNumericMulti(edge);
+
+  delete p1;
+  delete p2;
+  delete p3;
+  delete p4;
+  delete p5;
+  delete dt1;
+  delete dt2;
+  delete dt3;
+  delete dt4;
+}
 int main(int argc, char **argv) {
   testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();

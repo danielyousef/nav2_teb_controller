@@ -5,6 +5,7 @@
 #include "nav2_teb_controller/g2o_types/edge_velocity_holonomic.h"
 #include "nav2_teb_controller/g2o_types/vertex_pose.h"
 #include "nav2_teb_controller/g2o_types/vertex_timediff.h"
+#include "test_jacobian_utils.hpp"
 
 using namespace nav2_teb_controller;
 
@@ -95,6 +96,33 @@ TEST(EdgeVelocityHolonomic, RotatedFrame) {
   // r_dx = 0.4 -> vx = 0.4 within limits; r_dy = 0 -> vy = 0
   EXPECT_NEAR(edge.error()[0], 0.0, 1e-9);
   EXPECT_NEAR(edge.error()[1], 0.0, 1e-9);
+
+  delete p0;
+  delete p1;
+  delete dt;
+}
+
+// Analytic Jacobian vs finite differences. Robot-frame velocities
+// vx = 1.0 > 0.5 - eps, vy = 2.0 > 0.4, omega = 1.6 > 1.0 - eps: all active.
+// theta1 = 0 far from wrap boundaries, vy penalty has epsilon 0 -> keep away
+// from the v_max_y cusp.
+TEST(EdgeVelocityHolonomic, JacobianMatchesNumeric) {
+  auto params = makeParams();
+
+  VertexPose *p0 = new VertexPose();
+  p0->setEstimate(PoseSE2(0, 0, 0));
+  VertexPose *p1 = new VertexPose();
+  p1->setEstimate(PoseSE2(0.5, 1.0, 0.8));
+  VertexTimeDiff *dt = new VertexTimeDiff(0.5);
+
+  EdgeVelocityHolonomic edge;
+  edge.setVertex(0, p0);
+  edge.setVertex(1, p1);
+  edge.setVertex(2, dt);
+  edge.setTebConfig(params);
+  edge.computeError();
+
+  expectAnalyticJacobianMatchesNumericMulti(edge);
 
   delete p0;
   delete p1;
