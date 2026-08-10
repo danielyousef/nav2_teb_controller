@@ -5,6 +5,7 @@
 #include "nav2_teb_controller/g2o_types/vertex_timediff.h"
 #include "nav2_teb_controller/g2o_types/penalties.h"
 #include "nav2_teb_controller/g2o_types/base_teb_edges.h"
+#include "nav2_teb_controller/g2o_types/edge_kinodynamics_helpers.hpp"
 #include "nav2_teb_controller/math_utils.hpp"
 
 #include <geometry_msgs/msg/twist.hpp>
@@ -37,6 +38,8 @@ namespace nav2_teb_controller
 class EdgeAcceleration : public BaseTebMultiEdge<2, double>
 {
 public:
+  using BaseTebMultiEdge<2, double>::linearizeOplus;
+
 
   /**
    * @brief Construct edge.
@@ -106,118 +109,74 @@ public:
     // TEB_ASSERT_MSG(std::isfinite(_error[1]), "EdgeAcceleration::computeError() rotational: _error[1]=%f\n",_error[1]);
   }
 
-
-
-#ifdef USE_ANALYTIC_JACOBI
-#if 0
-  /*
+  /**
    * @brief Jacobi matrix of the cost function specified in computeError().
+   *
+   * Row 0: translational acceleration, Row 1: rotational acceleration.
+   * Includes the exact-arc-length variant and the sigmoid direction terms.
    */
-  void linearizeOplus()
+#if USE_ANALYTIC_JACOBI
+  void linearizeOplus() override
   {
-    TEB_ASSERT_MSG(cfg_, "You must call setTebConfig on EdgeAcceleration()");
-    const VertexPointXY* conf1 = static_cast<const VertexPointXY*>(_vertices[0]);
-    const VertexPointXY* conf2 = static_cast<const VertexPointXY*>(_vertices[1]);
-    const VertexPointXY* conf3 = static_cast<const VertexPointXY*>(_vertices[2]);
-    const VertexTimeDiff* deltaT1 = static_cast<const VertexTimeDiff*>(_vertices[3]);
-    const VertexTimeDiff* deltaT2 = static_cast<const VertexTimeDiff*>(_vertices[4]);
-    const VertexOrientation* angle1 = static_cast<const VertexOrientation*>(_vertices[5]);
-    const VertexOrientation* angle2 = static_cast<const VertexOrientation*>(_vertices[6]);
-    const VertexOrientation* angle3 = static_cast<const VertexOrientation*>(_vertices[7]);
+    // read params
+    const double a_max_x = params_->FollowPath.robot.a_max_x;
+    const double a_max_theta = params_->FollowPath.robot.a_max_theta;
+    const double penalty_eps = params_->FollowPath.optimizer.penalty_epsilon;
+    const bool exact_arc_length = params_->FollowPath.optimizer.exact_arc_length;
 
-    Eigen::Vector2d deltaS1 = conf2->estimate() - conf1->estimate();
-    Eigen::Vector2d deltaS2 = conf3->estimate() - conf2->estimate();
-    double dist1 = deltaS1.norm();
-    double dist2 = deltaS2.norm();
-    
-    double sum_time = deltaT1->estimate() + deltaT2->estimate();
-    double sum_time_inv = 1 / sum_time;
-    double dt1_inv = 1/deltaT1->estimate();
-    double dt2_inv = 1/deltaT2->estimate();
-    double aux0 = 2/sum_time_inv;
-    double aux1 = dist1 * deltaT1->estimate();
-    double aux2 = dist2 * deltaT2->estimate();
+    const auto* pose1 = dynamic_cast<const VertexPose*>(_vertices[0]);
+    const auto* pose2 = dynamic_cast<const VertexPose*>(_vertices[1]);
+    const auto* pose3 = dynamic_cast<const VertexPose*>(_vertices[2]);
+    const auto* dt1 = dynamic_cast<const VertexTimeDiff*>(_vertices[3]);
+    const auto* dt2 = dynamic_cast<const VertexTimeDiff*>(_vertices[4]);
 
-    double vel1 = dist1 * dt1_inv;
-    double vel2 = dist2 * dt2_inv;
-    double omega1 = g2o::normalize_theta( angle2->estimate() - angle1->estimate() ) * dt1_inv;
-    double omega2 = g2o::normalize_theta( angle3->estimate() - angle2->estimate() ) * dt2_inv;
-    double acc = (vel2 - vel1) * aux0;
-    double omegadot = (omega2 - omega1) * aux0;
-    double aux3 = -acc/2;
-    double aux4 = -omegadot/2;
-    
-    double dev_border_acc = penaltyBoundToIntervalDerivative(acc, tebConfig.robot_acceleration_max_trans,optimizationConfig.optimization_boundaries_epsilon,optimizationConfig.optimization_boundaries_scale,optimizationConfig.optimization_boundaries_order);
-    double dev_border_omegadot = penaltyBoundToIntervalDerivative(omegadot, tebConfig.robot_acceleration_max_rot,optimizationConfig.optimization_boundaries_epsilon,optimizationConfig.optimization_boundaries_scale,optimizationConfig.optimization_boundaries_order);
-    
-    _jacobianOplus[0].resize(2,2); // conf1
-    _jacobianOplus[1].resize(2,2); // conf2
-    _jacobianOplus[2].resize(2,2); // conf3
-    _jacobianOplus[3].resize(2,1); // deltaT1
-    _jacobianOplus[4].resize(2,1); // deltaT2
-    _jacobianOplus[5].resize(2,1); // angle1
-    _jacobianOplus[6].resize(2,1); // angle2
-    _jacobianOplus[7].resize(2,1); // angle3
-    
-    if (aux1==0) aux1=1e-20;
-    if (aux2==0) aux2=1e-20;
-  
-    if (dev_border_acc!=0)
-    {
-      // TODO: double aux = aux0 * dev_border_acc;
-      // double aux123 = aux / aux1;
-      _jacobianOplus[0](0,0) = aux0 * deltaS1[0] / aux1 * dev_border_acc; // acc x1
-      _jacobianOplus[0](0,1) = aux0 * deltaS1[1] / aux1 * dev_border_acc; // acc y1
-      _jacobianOplus[1](0,0) = -aux0 * ( deltaS1[0] / aux1 + deltaS2[0] / aux2 ) * dev_border_acc; // acc x2
-      _jacobianOplus[1](0,1) = -aux0 * ( deltaS1[1] / aux1 + deltaS2[1] / aux2 ) * dev_border_acc; // acc y2
-      _jacobianOplus[2](0,0) = aux0 * deltaS2[0] / aux2 * dev_border_acc; // acc x3
-      _jacobianOplus[2](0,1) = aux0 * deltaS2[1] / aux2 * dev_border_acc; // acc y3	
-      _jacobianOplus[2](0,0) = 0;
-      _jacobianOplus[2](0,1) = 0;
-      _jacobianOplus[3](0,0) = aux0 * (aux3 + vel1 * dt1_inv) * dev_border_acc; // acc deltaT1
-      _jacobianOplus[4](0,0) = aux0 * (aux3 - vel2 * dt2_inv) * dev_border_acc; // acc deltaT2
-    }
-    else
-    {
-      _jacobianOplus[0](0,0) = 0; // acc x1
-      _jacobianOplus[0](0,1) = 0; // acc y1	
-      _jacobianOplus[1](0,0) = 0; // acc x2
-      _jacobianOplus[1](0,1) = 0; // acc y2
-      _jacobianOplus[2](0,0) = 0; // acc x3
-      _jacobianOplus[2](0,1) = 0; // acc y3	
-      _jacobianOplus[3](0,0) = 0; // acc deltaT1
-      _jacobianOplus[4](0,0) = 0; // acc deltaT2
-    }
-    
-    if (dev_border_omegadot!=0)
-    {
-      _jacobianOplus[3](1,0) = aux0 * ( aux4 + omega1 * dt1_inv ) * dev_border_omegadot; // omegadot deltaT1
-      _jacobianOplus[4](1,0) = aux0 * ( aux4 - omega2 * dt2_inv ) * dev_border_omegadot; // omegadot deltaT2
-      _jacobianOplus[5](1,0) = aux0 * dt1_inv * dev_border_omegadot; // omegadot angle1
-      _jacobianOplus[6](1,0) = -aux0 * ( dt1_inv + dt2_inv ) * dev_border_omegadot; // omegadot angle2
-      _jacobianOplus[7](1,0) = aux0 * dt2_inv * dev_border_omegadot; // omegadot angle3
-    }
-    else
-    {
-      _jacobianOplus[3](1,0) = 0; // omegadot deltaT1
-      _jacobianOplus[4](1,0) = 0; // omegadot deltaT2
-      _jacobianOplus[5](1,0) = 0; // omegadot angle1
-      _jacobianOplus[6](1,0) = 0; // omegadot angle2
-      _jacobianOplus[7](1,0) = 0; // omegadot angle3			
-    }
+    const SegmentMotion seg1 = makeSegmentMotion(
+      pose2->position() - pose1->position(), pose1->theta(), pose2->theta(),
+      dt1->dt(), exact_arc_length);
+    const SegmentMotion seg2 = makeSegmentMotion(
+      pose3->position() - pose2->position(), pose2->theta(), pose3->theta(),
+      dt2->dt(), exact_arc_length);
+    const SigmoidTerm sig1 = makeSigmoidTerm(seg1.delta, seg1.cos_i, seg1.sin_i);
+    const SigmoidTerm sig2 = makeSigmoidTerm(seg2.delta, seg2.cos_i, seg2.sin_i);
 
-    _jacobianOplus[0](1,0) = 0; // omegadot x1
-    _jacobianOplus[0](1,1) = 0; // omegadot y1
-    _jacobianOplus[1](1,0) = 0; // omegadot x2
-    _jacobianOplus[1](1,1) = 0; // omegadot y2
-    _jacobianOplus[2](1,0) = 0; // omegadot x3
-    _jacobianOplus[2](1,1) = 0; // omegadot y3
-    _jacobianOplus[5](0,0) = 0; // acc angle1
-    _jacobianOplus[6](0,0) = 0; // acc angle2
-    _jacobianOplus[7](0,0) = 0; // acc angle3
-    }
-#endif
-#endif
+    const double vel1 = seg1.velRaw() * sig1.sigma;
+    const double vel2 = seg2.velRaw() * sig2.sigma;
+    const double omega1 = seg1.omega();
+    const double omega2 = seg2.omega();
+
+    const AccelPairGrads grads = makeAccelPairGrads(
+      seg1, sig1, vel1, omega1, seg2, sig2, vel2, omega2);
+
+    const double dev_lin = penaltyBoundToIntervalDerivative(
+      grads.a_lin, a_max_x, penalty_eps);
+    const double dev_rot = penaltyBoundToIntervalDerivative(
+      grads.a_rot, a_max_theta, penalty_eps);
+
+    _jacobianOplus[0].setZero();
+    _jacobianOplus[1].setZero();
+    _jacobianOplus[2].setZero();
+    _jacobianOplus[3].setZero();
+    _jacobianOplus[4].setZero();
+
+    // conf1
+    _jacobianOplus[0].block<1, 3>(0, 0) = dev_lin * (grads.lin_pose[0].transpose());
+    _jacobianOplus[0].block<1, 3>(1, 0) = dev_rot * (grads.rot_pose[0].transpose());
+    // conf2
+    _jacobianOplus[1].block<1, 3>(0, 0) =
+      dev_lin * (grads.lin_pose[1].transpose());
+    _jacobianOplus[1].block<1, 3>(1, 0) =
+      dev_rot * (grads.rot_pose[1].transpose());
+    // conf3
+    _jacobianOplus[2].block<1, 3>(0, 0) = dev_lin * (grads.lin_pose[2].transpose());
+    _jacobianOplus[2].block<1, 3>(1, 0) = dev_rot * (grads.rot_pose[2].transpose());
+    // deltaT1
+    _jacobianOplus[3](0, 0) = dev_lin * grads.lin_dt[0];
+    _jacobianOplus[3](1, 0) = dev_rot * grads.rot_dt[0];
+    // deltaT2
+    _jacobianOplus[4](0, 0) = dev_lin * grads.lin_dt[1];
+    _jacobianOplus[4](1, 0) = dev_rot * grads.rot_dt[1];
+  }
+#endif  // USE_ANALYTIC_JACOBI
 
       
 

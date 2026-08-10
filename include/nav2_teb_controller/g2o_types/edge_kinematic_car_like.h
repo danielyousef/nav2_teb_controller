@@ -39,6 +39,8 @@ namespace nav2_teb_controller
 class EdgeKinematicsCarlike : public BaseTebBinaryEdge<2, double, VertexPose, VertexPose>
 {
 public:
+  using BaseTebBinaryEdge<2, double, VertexPose, VertexPose>::linearizeOplus;
+
   
   /**
    * @brief Construct edge.
@@ -78,6 +80,89 @@ public:
     
     // TEB_ASSERT_MSG(std::isfinite(_error[0]) && std::isfinite(_error[1]), "EdgeKinematicsCarlike::computeError() _error[0]=%f _error[1]=%f\n",_error[0],_error[1]);
   }
+
+  /**
+   * @brief Jacobi matrix of the cost function specified in computeError().
+   *
+   * Row 0: non-holonomic constraint (same structure as EdgeKinematicsDiffDrive).
+   * Row 1: minimum turning radius penalty.
+   */
+#if USE_ANALYTIC_JACOBI
+  void linearizeOplus() override
+  {
+    // read params
+    const double turning_radius = params_->FollowPath.robot.min_turning_radius;
+    const bool exact_arc_length = params_->FollowPath.optimizer.exact_arc_length;
+
+    const auto* conf1 = dynamic_cast<const VertexPose*>(_vertices[0]);
+    const auto* conf2 = dynamic_cast<const VertexPose*>(_vertices[1]);
+
+    const Eigen::Vector2d deltaS = conf2->position() - conf1->position();
+    const double dist = deltaS.norm();
+    const double cos1 = std::cos(conf1->theta());
+    const double cos2 = std::cos(conf2->theta());
+    const double sin1 = std::sin(conf1->theta());
+    const double sin2 = std::sin(conf2->theta());
+    const double aux1 = sin1 + sin2;
+    const double aux2 = cos1 + cos2;
+
+    // --- Row 0: non-holonomic constraint e0 = |(c1+c2)dy - (s1+s2)dx| ---
+    const double dev_nh_abs = std::copysign(1.0, aux2 * deltaS[1] - aux1 * deltaS[0]);
+
+    // --- Row 1: turning radius penalty e1 = penaltyFromBelow(radius, r_min, 0) ---
+    const double angle_diff = angles::normalize_angle(conf2->theta() - conf1->theta());
+
+    _jacobianOplusXi.setZero();
+    _jacobianOplusXj.setZero();
+
+    // Row 0 blocks
+    _jacobianOplusXi(0, 0) =  aux1 * dev_nh_abs;  // e0 x1
+    _jacobianOplusXi(0, 1) = -aux2 * dev_nh_abs;  // e0 y1
+    _jacobianOplusXi(0, 2) = (-sin1 * deltaS[1] - cos1 * deltaS[0]) * dev_nh_abs;  // e0 theta1
+    _jacobianOplusXj(0, 0) = -aux1 * dev_nh_abs;  // e0 x2
+    _jacobianOplusXj(0, 1) =  aux2 * dev_nh_abs;  // e0 y2
+    _jacobianOplusXj(0, 2) = (-sin2 * deltaS[1] - cos2 * deltaS[0]) * dev_nh_abs;  // e0 theta2
+
+    // Row 1 blocks: radius derivatives w.r.t. positions and headings
+    if (std::abs(angle_diff) < 1e-12 || dist < 1e-12)
+      return;  // e1 = 0 in the straight-line branch
+
+    double radius = 0.0;
+    double dr_ddist = 0.0;      // d radius / d dist
+    double dr_dangle = 0.0;     // d radius / d angle_diff
+    if (exact_arc_length)
+    {
+      const double s = std::sin(angle_diff / 2.0);
+      const double g = 1.0 / (2.0 * std::abs(s));
+      radius = dist * g;
+      dr_ddist = g;
+      // g'(t) = -sign(t) * cos(t/2) / (4 sin^2(t/2))
+      dr_dangle = -dist * std::copysign(1.0, angle_diff) * std::cos(angle_diff / 2.0) /
+                  (4.0 * s * s);
+    }
+    else
+    {
+      radius = dist / std::abs(angle_diff);
+      dr_ddist = 1.0 / std::abs(angle_diff);
+      dr_dangle = -dist * std::copysign(1.0, angle_diff) / (angle_diff * angle_diff);
+    }
+
+    const double dev_border =
+        penaltyBoundFromBelowDerivative(radius, turning_radius, 0.0);
+
+    // unit vector of deltaS
+    const double ux = deltaS[0] / dist;
+    const double uy = deltaS[1] / dist;
+    // d(radius)/dp = -dr_ddist * unit,  d(radius)/dq = +dr_ddist * unit
+    // d(angle_diff)/d theta1 = -1,  d(angle_diff)/d theta2 = +1
+    _jacobianOplusXi(1, 0) = -dr_ddist * ux * dev_border;  // e1 x1
+    _jacobianOplusXi(1, 1) = -dr_ddist * uy * dev_border;  // e1 y1
+    _jacobianOplusXi(1, 2) = -dr_dangle * dev_border;      // e1 theta1
+    _jacobianOplusXj(1, 0) =  dr_ddist * ux * dev_border;  // e1 x2
+    _jacobianOplusXj(1, 1) =  dr_ddist * uy * dev_border;  // e1 y2
+    _jacobianOplusXj(1, 2) =  dr_dangle * dev_border;      // e1 theta2
+  }
+#endif  // USE_ANALYTIC_JACOBI
   
 
   EIGEN_MAKE_ALIGNED_OPERATOR_NEW   

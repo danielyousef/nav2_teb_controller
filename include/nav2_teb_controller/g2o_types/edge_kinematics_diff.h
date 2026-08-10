@@ -32,6 +32,8 @@ namespace nav2_teb_controller
 class EdgeKinematicsDiffDrive : public BaseTebBinaryEdge<2, double, VertexPose, VertexPose>
 {
 public:
+  using BaseTebBinaryEdge<2, double, VertexPose, VertexPose>::linearizeOplus;
+
   
   /**
    * @brief Construct edge.
@@ -65,14 +67,12 @@ public:
     // TEB_ASSERT_MSG(std::isfinite(_error[0]) && std::isfinite(_error[1]), "EdgeKinematicsDiffDrive::computeError() _error[0]=%f _error[1]=%f\n",_error[0],_error[1]);
   }
 
-#ifdef USE_ANALYTIC_JACOBI
-#if 1
   /**
    * @brief Jacobi matrix of the cost function specified in computeError().
    */
-  void linearizeOplus()
+#if USE_ANALYTIC_JACOBI
+  void linearizeOplus() override
   {
-    TEB_ASSERT_MSG(cfg_, "You must call setTebConfig on EdgeKinematicsDiffDrive()");
     const VertexPose* conf1 = static_cast<const VertexPose*>(_vertices[0]);
     const VertexPose* conf2 = static_cast<const VertexPose*>(_vertices[1]);
     
@@ -108,8 +108,7 @@ public:
     _jacobianOplusXj(0,2) = (-sin2*deltaS[1] - cos2*deltaS[0]) * dev_nh_abs; // nh angle
     _jacobianOplusXj(1,2) = 0; // drive-dir angle1					
   }
-#endif
-#endif
+#endif  // USE_ANALYTIC_JACOBI
       
 
   EIGEN_MAKE_ALIGNED_OPERATOR_NEW   

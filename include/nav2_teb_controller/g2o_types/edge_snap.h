@@ -5,6 +5,7 @@
 #include "nav2_teb_controller/g2o_types/vertex_timediff.h"
 #include "nav2_teb_controller/g2o_types/base_teb_edges.h"
 #include "nav2_teb_controller/g2o_types/penalties.h"
+#include "nav2_teb_controller/g2o_types/edge_kinodynamics_helpers.hpp"
 #include "nav2_teb_controller/core/pose_se2.hpp"
 #include "nav2_teb_controller/math_utils.hpp"
 
@@ -32,6 +33,8 @@ namespace nav2_teb_controller
 class EdgeSnap : public BaseTebMultiEdge<2, double>
 {
 public:
+  using BaseTebMultiEdge<2, double>::linearizeOplus;
+
   EdgeSnap()
   {
     this->resize(9); // 5 Poses, 4 TimeDiffs
@@ -127,6 +130,163 @@ public:
 
     // TEB_ASSERT_MSG(std::isfinite(_error[0]) && std::isfinite(_error[1]), "EdgeSnap::computeError() produced nan values.");
   }
+
+  /**
+   * @brief Jacobi matrix of the cost function specified in computeError().
+   *
+   * The snap is a nested difference quotient (velocities -> accelerations ->
+   * jerks -> snap); the Jacobian is built by chain rule along this 1-D chain.
+   */
+#if USE_ANALYTIC_JACOBI
+  void linearizeOplus() override
+  {
+    // read params
+    const double snap_max_x = params_->FollowPath.robot.snap_max_x;
+    const double snap_max_theta = params_->FollowPath.robot.snap_max_theta;
+    const double penalty_eps = params_->FollowPath.optimizer.penalty_epsilon;
+
+    const auto* pose1 = dynamic_cast<const VertexPose*>(_vertices[0]);
+    const auto* pose2 = dynamic_cast<const VertexPose*>(_vertices[1]);
+    const auto* pose3 = dynamic_cast<const VertexPose*>(_vertices[2]);
+    const auto* pose4 = dynamic_cast<const VertexPose*>(_vertices[3]);
+    const auto* pose5 = dynamic_cast<const VertexPose*>(_vertices[4]);
+
+    const auto* dt1 = dynamic_cast<const VertexTimeDiff*>(_vertices[5]);
+    const auto* dt2 = dynamic_cast<const VertexTimeDiff*>(_vertices[6]);
+    const auto* dt3 = dynamic_cast<const VertexTimeDiff*>(_vertices[7]);
+    const auto* dt4 = dynamic_cast<const VertexTimeDiff*>(_vertices[8]);
+
+    // --- linear chain ---
+    const Eigen::Vector2d diff[4] = {
+      pose2->position() - pose1->position(), pose3->position() - pose2->position(),
+      pose4->position() - pose3->position(), pose5->position() - pose4->position()};
+    const double theta_pose[5] = {pose1->theta(), pose2->theta(), pose3->theta(),
+                                  pose4->theta(), pose5->theta()};
+    const double dt[4] = {dt1->dt(), dt2->dt(), dt3->dt(), dt4->dt()};
+
+    const double vel[4] = {diff[0].norm() / dt[0], diff[1].norm() / dt[1],
+                           diff[2].norm() / dt[2], diff[3].norm() / dt[3]};
+
+    SigmoidTerm sig[4];
+    Eigen::Vector2d u[4];
+    for (int i = 0; i < 4; ++i) {
+      const double cos_i = std::cos(theta_pose[i]);
+      const double sin_i = std::sin(theta_pose[i]);
+      sig[i] = makeSigmoidTerm(diff[i], cos_i, sin_i);
+      u[i] = diff[i].norm() > 1e-12 ? Eigen::Vector2d(diff[i] / diff[i].norm()) :
+        Eigen::Vector2d::Zero();
+    }
+    const double vel_sig[4] = {vel[0] * sig[0].sigma, vel[1] * sig[1].sigma,
+                               vel[2] * sig[2].sigma, vel[3] * sig[3].sigma};
+
+    const double T12 = dt[0] + dt[1];
+    const double T23 = dt[1] + dt[2];
+    const double T34 = dt[2] + dt[3];
+    const double S123 = dt[0] + dt[1] + dt[2];
+    const double S234 = dt[1] + dt[2] + dt[3];
+    const double T = dt[0] + dt[1] + dt[2] + dt[3];
+
+    const double acc[3] = {2.0 * (vel_sig[1] - vel_sig[0]) / T12,
+                           2.0 * (vel_sig[2] - vel_sig[1]) / T23,
+                           2.0 * (vel_sig[3] - vel_sig[2]) / T34};
+    const double jerk[2] = {2.0 * (acc[1] - acc[0]) / S123,
+                            2.0 * (acc[2] - acc[1]) / S234};
+    const double snap_lin = 2.0 * (jerk[1] - jerk[0]) / T;
+
+    const double dev_lin = penaltyBoundToIntervalDerivative(snap_lin, snap_max_x, penalty_eps);
+
+    // chain coefficients
+    const double ds_dj[2] = {-2.0 / T, 2.0 / T};
+    const double ds_dacc[3] = {
+      ds_dj[0] * (-2.0 / S123),
+      ds_dj[0] * (2.0 / S123) + ds_dj[1] * (-2.0 / S234),
+      ds_dj[1] * (2.0 / S234)};
+    const double ds_dv[4] = {
+      ds_dacc[0] * (-2.0 / T12),
+      ds_dacc[0] * (2.0 / T12) + ds_dacc[1] * (-2.0 / T23),
+      ds_dacc[1] * (2.0 / T23) + ds_dacc[2] * (-2.0 / T34),
+      ds_dacc[2] * (2.0 / T34)};
+    const double ds_ddt[4] = {
+      ds_dacc[0] * (-acc[0] / T12) + ds_dj[0] * (-jerk[0] / S123) - snap_lin / T +
+        ds_dv[0] * (-vel_sig[0] / dt[0]),
+      ds_dacc[0] * (-acc[0] / T12) + ds_dacc[1] * (-acc[1] / T23) +
+        ds_dj[0] * (-jerk[0] / S123) + ds_dj[1] * (-jerk[1] / S234) - snap_lin / T +
+        ds_dv[1] * (-vel_sig[1] / dt[1]),
+      ds_dacc[1] * (-acc[1] / T23) + ds_dacc[2] * (-acc[2] / T34) +
+        ds_dj[0] * (-jerk[0] / S123) + ds_dj[1] * (-jerk[1] / S234) - snap_lin / T +
+        ds_dv[2] * (-vel_sig[2] / dt[2]),
+      ds_dacc[2] * (-acc[2] / T34) + ds_dj[1] * (-jerk[1] / S234) - snap_lin / T +
+        ds_dv[3] * (-vel_sig[3] / dt[3])};
+
+    // --- rotational chain (identical structure on omega) ---
+    // omega_i = (theta[i+1] - theta[i]) / dt[i] with unwrapped angles; the
+    // unwrap has derivative 1 w.r.t. the corresponding pose angle.
+    const double omega[4] = {
+      (theta_pose[1] - theta_pose[0]) / dt[0],
+      (theta_pose[2] - theta_pose[1]) / dt[1],
+      (theta_pose[3] - theta_pose[2]) / dt[2],
+      (theta_pose[4] - theta_pose[3]) / dt[3]};
+    const double acc_rot[3] = {2.0 * (omega[1] - omega[0]) / T12,
+                               2.0 * (omega[2] - omega[1]) / T23,
+                               2.0 * (omega[3] - omega[2]) / T34};
+    const double jerk_rot[2] = {2.0 * (acc_rot[1] - acc_rot[0]) / S123,
+                                2.0 * (acc_rot[2] - acc_rot[1]) / S234};
+    const double snap_rot = 2.0 * (jerk_rot[1] - jerk_rot[0]) / T;
+
+    const double dev_rot = penaltyBoundToIntervalDerivative(snap_rot, snap_max_theta, penalty_eps);
+
+    const double drs_dacc[3] = {
+      ds_dj[0] * (-2.0 / S123),
+      ds_dj[0] * (2.0 / S123) + ds_dj[1] * (-2.0 / S234),
+      ds_dj[1] * (2.0 / S234)};
+    const double drs_dw[4] = {
+      drs_dacc[0] * (-2.0 / T12),
+      drs_dacc[0] * (2.0 / T12) + drs_dacc[1] * (-2.0 / T23),
+      drs_dacc[1] * (2.0 / T23) + drs_dacc[2] * (-2.0 / T34),
+      drs_dacc[2] * (2.0 / T34)};
+    const double drs_ddt[4] = {
+      drs_dacc[0] * (-acc_rot[0] / T12) + ds_dj[0] * (-jerk_rot[0] / S123) - snap_rot / T +
+        drs_dw[0] * (-omega[0] / dt[0]),
+      drs_dacc[0] * (-acc_rot[0] / T12) + drs_dacc[1] * (-acc_rot[1] / T23) +
+        ds_dj[0] * (-jerk_rot[0] / S123) + ds_dj[1] * (-jerk_rot[1] / S234) - snap_rot / T +
+        drs_dw[1] * (-omega[1] / dt[1]),
+      drs_dacc[1] * (-acc_rot[1] / T23) + drs_dacc[2] * (-acc_rot[2] / T34) +
+        ds_dj[0] * (-jerk_rot[0] / S123) + ds_dj[1] * (-jerk_rot[1] / S234) - snap_rot / T +
+        drs_dw[2] * (-omega[2] / dt[2]),
+      drs_dacc[2] * (-acc_rot[2] / T34) + ds_dj[1] * (-jerk_rot[1] / S234) - snap_rot / T +
+        drs_dw[3] * (-omega[3] / dt[3])};
+
+    // --- assemble blocks ---
+    for (int i = 0; i < 9; ++i)
+      _jacobianOplus[i].setZero();
+
+    // d(vel_i)/d(p_i) = -sigma_i * u_i / dt_i - vel_raw_i * sigma_i' * heading_i
+    // d(vel_i)/d(p_{i+1}) = +sigma_i * u_i / dt_i + vel_raw_i * sigma_i' * heading_i
+    // d(vel_i)/d(theta_i) = vel_raw_i * sigma_i' * rot_i
+    // d(omega_i)/d(theta_i) = -1/dt_i, d(omega_i)/d(theta_{i+1}) = +1/dt_i
+    for (int i = 0; i < 4; ++i) {
+      const double cos_i = std::cos(theta_pose[i]);
+      const double sin_i = std::sin(theta_pose[i]);
+      const Eigen::Vector2d dv_dp_prev = -sig[i].sigma * u[i] / dt[i] -
+        vel[i] * sig[i].deriv * Eigen::Vector2d(cos_i, sin_i);
+      const Eigen::Vector2d dv_dp_next = sig[i].sigma * u[i] / dt[i] +
+        vel[i] * sig[i].deriv * Eigen::Vector2d(cos_i, sin_i);
+
+      // pose i
+      _jacobianOplus[i](0, 0) += dev_lin * ds_dv[i] * dv_dp_prev.x();
+      _jacobianOplus[i](0, 1) += dev_lin * ds_dv[i] * dv_dp_prev.y();
+      _jacobianOplus[i](0, 2) += dev_lin * ds_dv[i] * vel[i] * sig[i].deriv * sig[i].rot1;
+      _jacobianOplus[i](1, 2) += dev_rot * drs_dw[i] * (-1.0 / dt[i]);
+      // pose i+1
+      _jacobianOplus[i + 1](0, 0) += dev_lin * ds_dv[i] * dv_dp_next.x();
+      _jacobianOplus[i + 1](0, 1) += dev_lin * ds_dv[i] * dv_dp_next.y();
+      _jacobianOplus[i + 1](1, 2) += dev_rot * drs_dw[i] * (1.0 / dt[i]);
+      // time diff i
+      _jacobianOplus[5 + i](0, 0) = dev_lin * ds_ddt[i];
+      _jacobianOplus[5 + i](1, 0) = dev_rot * drs_ddt[i];
+    }
+  }
+#endif  // USE_ANALYTIC_JACOBI
 };
 
 } // end namespace

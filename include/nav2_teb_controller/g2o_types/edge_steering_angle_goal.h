@@ -33,6 +33,8 @@ namespace nav2_teb_controller
 class EdgeSteeringAngleGoal : public BaseTebMultiEdge<1, double>
 {
 public:
+  using BaseTebMultiEdge<1, double>::linearizeOplus;
+
   EdgeSteeringAngleGoal()
   {
     // This edge now connects 5 vertices (the last 5 poses)
@@ -108,6 +110,85 @@ public:
     _error[0] = penaltyBoundToInterval(steering_angle, -M_PI_2 / 6, M_PI_2 / 6, penalty_eps);
     // TEB_ASSERT_MSG(std::isfinite(_error[0]), "EdgeSteeringAngleGoal::computeError() _error[0]=%f\n", _error[0]);
   }
+
+  /**
+   * @brief Jacobi matrix of the cost function specified in computeError().
+   *
+   * The least-squares circle fit is differentiable away from degeneracies:
+   * d(p) = pinv * (dB - dA * p) with pinv the pseudo-inverse of A.
+   * Only the position components (x, y) of each pose enter the error.
+   */
+#if USE_ANALYTIC_JACOBI
+  void linearizeOplus() override
+  {
+    // read params
+    const double wheelbase = params_->FollowPath.robot.wheelbase;
+    const double penalty_eps = params_->FollowPath.optimizer.penalty_epsilon;
+
+    const auto* pose_n_minus_4 = dynamic_cast<const VertexPose*>(_vertices[0]);
+    const auto* pose_n_minus_3 = dynamic_cast<const VertexPose*>(_vertices[1]);
+    const auto* pose_n_minus_2 = dynamic_cast<const VertexPose*>(_vertices[2]);
+    const auto* pose_n_minus_1 = dynamic_cast<const VertexPose*>(_vertices[3]);
+    const auto* pose_n = dynamic_cast<const VertexPose*>(_vertices[4]);
+
+    for (int i = 0; i < 5; ++i)
+      _jacobianOplus[i].setZero();
+
+    const Eigen::Vector2d p1 = pose_n_minus_4->position();
+    const Eigen::Vector2d p2 = pose_n_minus_3->position();
+    const Eigen::Vector2d p3 = pose_n_minus_2->position();
+    const Eigen::Vector2d p4 = pose_n_minus_1->position();
+    const Eigen::Vector2d p5 = pose_n->position();
+
+    Eigen::Matrix<double, 5, 3> A;
+    Eigen::Matrix<double, 5, 1> B;
+
+    A << p1.x(), p1.y(), 1,
+         p2.x(), p2.y(), 1,
+         p3.x(), p3.y(), 1,
+         p4.x(), p4.y(), 1,
+         p5.x(), p5.y(), 1;
+
+    B << p1.x()*p1.x() + p1.y()*p1.y(),
+         p2.x()*p2.x() + p2.y()*p2.y(),
+         p3.x()*p3.x() + p3.y()*p3.y(),
+         p4.x()*p4.x() + p4.y()*p4.y(),
+         p5.x()*p5.x() + p5.y()*p5.y();
+
+    const Eigen::Vector3d p = A.colPivHouseholderQr().solve(B);
+
+    const double xc = p[0] / 2.0;
+    const double yc = p[1] / 2.0;
+    const double R_squared = p[2] + xc*xc + yc*yc;
+    if (R_squared <= 0)
+      return;
+    const double R = std::sqrt(R_squared);
+    if (R > 1e6)
+      return;
+
+    const double kappa = 1.0 / R;
+    const double steering_angle = std::atan(wheelbase * kappa);
+    const double dev = penaltyBoundToIntervalDerivative(
+      steering_angle, -M_PI_2 / 6, M_PI_2 / 6, penalty_eps);
+    // d(steering)/d(R^2) = d(steering)/d(kappa) * d(kappa)/d(R^2)
+    // d(kappa)/d(R^2) = -kappa^3 / 2
+    const double dsteer_dRsq = dev * wheelbase / (1.0 + wheelbase * wheelbase * kappa * kappa) *
+      (-0.5 * kappa * kappa * kappa);
+
+    const Eigen::Matrix<double, 3, 5> pinv = A.completeOrthogonalDecomposition().pseudoInverse();
+    const Eigen::Vector2d pos[5] = {p1, p2, p3, p4, p5};
+    for (int i = 0; i < 5; ++i) {
+      // d p / d x_i = pinv.col(i) * (2 x_i - p[0])
+      const Eigen::Vector3d dp_dx = pinv.col(i) * (2.0 * pos[i].x() - p[0]);
+      const Eigen::Vector3d dp_dy = pinv.col(i) * (2.0 * pos[i].y() - p[1]);
+      // R^2 = p[2] + p[0]^2/4 + p[1]^2/4
+      const double dRsq_dx = dp_dx[2] + xc * dp_dx[0] + yc * dp_dx[1];
+      const double dRsq_dy = dp_dy[2] + xc * dp_dy[0] + yc * dp_dy[1];
+      _jacobianOplus[i](0, 0) = dsteer_dRsq * dRsq_dx;
+      _jacobianOplus[i](0, 1) = dsteer_dRsq * dRsq_dy;
+    }
+  }
+#endif  // USE_ANALYTIC_JACOBI
 
 
   EIGEN_MAKE_ALIGNED_OPERATOR_NEW

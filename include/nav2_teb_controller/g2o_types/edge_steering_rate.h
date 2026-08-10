@@ -28,6 +28,8 @@ namespace nav2_teb_controller
 class EdgeSteeringRate : public BaseTebMultiEdge<1, double>
 {
 public:
+  using BaseTebMultiEdge<1, double>::linearizeOplus;
+
 
   /**
    * @brief Construct edge.
@@ -85,6 +87,94 @@ public:
 
     _error[0] = penaltyBoundToInterval(steer_rate, steering_rate_max, penalty_eps);
   }
+
+  /**
+   * @brief Jacobi matrix of the cost function specified in computeError().
+   *
+   * The direction sign is treated as locally constant (the edge itself uses a
+   * hard sign, which is non-differentiable at the sign flip).
+   */
+#if USE_ANALYTIC_JACOBI
+  void linearizeOplus() override
+  {
+    // read params
+    const double wheelbase = params_->FollowPath.robot.wheelbase;
+    const double steering_rate_max = params_->FollowPath.robot.steering_rate_max;
+    const double penalty_eps = params_->FollowPath.optimizer.penalty_epsilon;
+    const bool exact_arc_length = params_->FollowPath.optimizer.exact_arc_length;
+
+    const auto* conf1 = dynamic_cast<const VertexPose*>(_vertices[0]);
+    const auto* conf2 = dynamic_cast<const VertexPose*>(_vertices[1]);
+    const auto* conf3 = dynamic_cast<const VertexPose*>(_vertices[2]);
+    const auto* dt1 = dynamic_cast<const VertexTimeDiff*>(_vertices[3]);
+    const auto* dt2 = dynamic_cast<const VertexTimeDiff*>(_vertices[4]);
+
+    const Eigen::Vector2d delta_s1 = conf2->position() - conf1->position();
+    const Eigen::Vector2d delta_s2 = conf3->position() - conf2->position();
+    const double dist1 = delta_s1.norm();
+    const double dist2 = delta_s2.norm();
+    const double angle_diff1 = angles::normalize_angle(conf2->theta() - conf1->theta());
+    const double angle_diff2 = angles::normalize_angle(conf3->theta() - conf2->theta());
+
+    _jacobianOplus[0].setZero();
+    _jacobianOplus[1].setZero();
+    _jacobianOplus[2].setZero();
+    _jacobianOplus[3].setZero();
+    _jacobianOplus[4].setZero();
+    if (dist1 < 1e-12 || dist2 < 1e-12)
+      return;  // error is identically zero
+
+    const double sign1 =
+      (delta_s1.dot(Eigen::Vector2d(std::cos(conf1->theta()), std::sin(conf1->theta()))) >= 0.0)
+      ? 1.0 : -1.0;
+    const double sign2 =
+      (delta_s2.dot(Eigen::Vector2d(std::cos(conf2->theta()), std::sin(conf2->theta()))) >= 0.0)
+      ? 1.0 : -1.0;
+
+    // phi = sign * atan(k), k = wheelbase/dist * g(angle_diff)
+    // d(phi)/d(dist) = -sign * k / (dist * (1 + k^2))
+    // d(phi)/d(angle_diff) = sign * wheelbase/dist * g' / (1 + k^2)
+    const double k1 = (wheelbase / dist1) *
+      (exact_arc_length ? 2.0 * std::sin(angle_diff1 / 2.0) : angle_diff1);
+    const double k2 = (wheelbase / dist2) *
+      (exact_arc_length ? 2.0 * std::sin(angle_diff2 / 2.0) : angle_diff2);
+    const double g1p = exact_arc_length ? std::cos(angle_diff1 / 2.0) : 1.0;
+    const double g2p = exact_arc_length ? std::cos(angle_diff2 / 2.0) : 1.0;
+    const double phi1_d_dist = -sign1 * k1 / (dist1 * (1.0 + k1 * k1));
+    const double phi2_d_dist = -sign2 * k2 / (dist2 * (1.0 + k2 * k2));
+    const double phi1_d_angle = sign1 * (wheelbase / dist1) * g1p / (1.0 + k1 * k1);
+    const double phi2_d_angle = sign2 * (wheelbase / dist2) * g2p / (1.0 + k2 * k2);
+
+    const double avg_dt = 0.5 * (dt1->dt() + dt2->dt());
+    const double inv_avg_dt = 1.0 / avg_dt;
+
+    const Eigen::Vector2d u1 = delta_s1 / dist1;
+    const Eigen::Vector2d u2 = delta_s2 / dist2;
+
+    const double phi1 = sign1 * std::atan(k1);
+    const double phi2 = sign2 * std::atan(k2);
+    const double steer_rate = (phi2 - phi1) * inv_avg_dt;
+    const double dev = penaltyBoundToIntervalDerivative(
+      steer_rate, steering_rate_max, penalty_eps);
+
+    // d(steer_rate) = (d(phi2) - d(phi1)) / avg_dt
+    // conf1
+    _jacobianOplus[0](0, 0) = dev * (-inv_avg_dt * phi1_d_dist * (-u1.x()));
+    _jacobianOplus[0](0, 1) = dev * (-inv_avg_dt * phi1_d_dist * (-u1.y()));
+    _jacobianOplus[0](0, 2) = dev * (-inv_avg_dt * (-phi1_d_angle));
+    // conf2
+    _jacobianOplus[1](0, 0) = dev * inv_avg_dt * (phi2_d_dist * (-u2.x()) - phi1_d_dist * u1.x());
+    _jacobianOplus[1](0, 1) = dev * inv_avg_dt * (phi2_d_dist * (-u2.y()) - phi1_d_dist * u1.y());
+    _jacobianOplus[1](0, 2) = dev * inv_avg_dt * (-phi2_d_angle - phi1_d_angle);
+    // conf3
+    _jacobianOplus[2](0, 0) = dev * inv_avg_dt * phi2_d_dist * u2.x();
+    _jacobianOplus[2](0, 1) = dev * inv_avg_dt * phi2_d_dist * u2.y();
+    _jacobianOplus[2](0, 2) = dev * inv_avg_dt * phi2_d_angle;
+    // deltaT1 / deltaT2 (d avg_dt / dt = 1/2)
+    _jacobianOplus[3](0, 0) = dev * (-0.5 * inv_avg_dt * steer_rate);
+    _jacobianOplus[4](0, 0) = dev * (-0.5 * inv_avg_dt * steer_rate);
+  }
+#endif  // USE_ANALYTIC_JACOBI
 
 
   EIGEN_MAKE_ALIGNED_OPERATOR_NEW

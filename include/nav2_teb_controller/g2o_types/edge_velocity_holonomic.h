@@ -35,6 +35,8 @@ namespace nav2_teb_controller
 class EdgeVelocityHolonomic : public BaseTebMultiEdge<3, double>
 {
 public:
+  using BaseTebMultiEdge<3, double>::linearizeOplus;
+
   
   /**
    * @brief Construct edge.
@@ -81,6 +83,70 @@ public:
     // TEB_ASSERT_MSG(std::isfinite(_error[0]) && std::isfinite(_error[1]) && std::isfinite(_error[2]),
     //                "EdgeVelocityHolonomic::computeError() _error[0]=%f _error[1]=%f _error[2]=%f\n",_error[0],_error[1],_error[2]);
   }
+
+  /**
+   * @brief Jacobi matrix of the cost function specified in computeError().
+   */
+#if USE_ANALYTIC_JACOBI
+  void linearizeOplus() override
+  {
+    // read params
+    const double v_max_x = params_->FollowPath.robot.v_max_x;
+    const double v_max_x_backwards = params_->FollowPath.robot.v_max_x_backwards;
+    const double v_max_y = params_->FollowPath.robot.v_max_y;
+    const double v_max_theta = params_->FollowPath.robot.v_max_theta;
+    const double penalty_eps = params_->FollowPath.optimizer.penalty_epsilon;
+
+    const auto* conf1 = dynamic_cast<const VertexPose*>(_vertices[0]);
+    const auto* conf2 = dynamic_cast<const VertexPose*>(_vertices[1]);
+    const auto* deltaT = dynamic_cast<const VertexTimeDiff*>(_vertices[2]);
+
+    const Eigen::Vector2d deltaS = conf2->position() - conf1->position();
+    const double dt = deltaT->estimate();
+    const double cos1 = std::cos(conf1->theta());
+    const double sin1 = std::sin(conf1->theta());
+
+    // transform conf2 into current robot frame conf1 (inverse 2d rotation matrix)
+    const double r_dx =  cos1 * deltaS.x() + sin1 * deltaS.y();
+    const double r_dy = -sin1 * deltaS.x() + cos1 * deltaS.y();
+
+    const double vx = r_dx / dt;
+    const double vy = r_dy / dt;
+    const double omega = angles::normalize_angle(conf2->theta() - conf1->theta()) / dt;
+
+    const double dev_vx = penaltyBoundToIntervalDerivative(
+      vx, -v_max_x_backwards, v_max_x, penalty_eps);
+    const double dev_vy = penaltyBoundToIntervalDerivative(vy, v_max_y, 0.0);
+    const double dev_omega = penaltyBoundToIntervalDerivative(
+      omega, v_max_theta, penalty_eps);
+
+    _jacobianOplus[0].setZero();
+    _jacobianOplus[1].setZero();
+    _jacobianOplus[2].setZero();
+
+    // conf1: d(r_dx)/dp = (-c1,-s1), d(r_dy)/dp = (s1,-c1),
+    //        d(r_dx)/d theta1 = r_dy, d(r_dy)/d theta1 = -r_dx
+    _jacobianOplus[0](0, 0) = dev_vx * (-cos1 / dt);
+    _jacobianOplus[0](0, 1) = dev_vx * (-sin1 / dt);
+    _jacobianOplus[0](0, 2) = dev_vx * (r_dy / dt);
+    _jacobianOplus[0](1, 0) = dev_vy * ( sin1 / dt);
+    _jacobianOplus[0](1, 1) = dev_vy * (-cos1 / dt);
+    _jacobianOplus[0](1, 2) = dev_vy * (-r_dx / dt);
+    _jacobianOplus[0](2, 2) = -dev_omega / dt;
+
+    // conf2
+    _jacobianOplus[1](0, 0) = dev_vx * ( cos1 / dt);
+    _jacobianOplus[1](0, 1) = dev_vx * ( sin1 / dt);
+    _jacobianOplus[1](1, 0) = dev_vy * (-sin1 / dt);
+    _jacobianOplus[1](1, 1) = dev_vy * ( cos1 / dt);
+    _jacobianOplus[1](2, 2) =  dev_omega / dt;
+
+    // deltaT
+    _jacobianOplus[2](0, 0) = dev_vx * (-vx / dt);
+    _jacobianOplus[2](1, 0) = dev_vy * (-vy / dt);
+    _jacobianOplus[2](2, 0) = dev_omega * (-omega / dt);
+  }
+#endif  // USE_ANALYTIC_JACOBI
    
 
   EIGEN_MAKE_ALIGNED_OPERATOR_NEW

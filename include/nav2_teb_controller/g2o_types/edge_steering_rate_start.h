@@ -5,6 +5,7 @@
 #include "nav2_teb_controller/g2o_types/vertex_timediff.h"
 #include "nav2_teb_controller/g2o_types/base_teb_edges.h"
 #include "nav2_teb_controller/g2o_types/penalties.h"
+#include "nav2_teb_controller/g2o_types/edge_kinodynamics_helpers.hpp"
 #include "nav2_teb_controller/core/pose_se2.hpp"
 #include "nav2_teb_controller/math_utils.hpp"
 
@@ -21,6 +22,8 @@ namespace nav2_teb_controller
 class EdgeSteeringRateStart : public BaseTebMultiEdge<1, double>
 {
 public:
+  using BaseTebMultiEdge<1, double>::linearizeOplus;
+
 
   /**
    * @brief Construct edge.
@@ -63,6 +66,72 @@ public:
     _error[0] = penaltyBoundToInterval(
       angles::normalize_angle(phi - _measurement) / dt->dt(), steering_rate_max, penalty_eps);
   }
+
+  /**
+   * @brief Jacobi matrix of the cost function specified in computeError().
+   */
+#if USE_ANALYTIC_JACOBI
+  void linearizeOplus() override
+  {
+    // read params
+    const double wheelbase = params_->FollowPath.robot.wheelbase;
+    const double steering_rate_max = params_->FollowPath.robot.steering_rate_max;
+    const double penalty_eps = params_->FollowPath.optimizer.penalty_epsilon;
+    const bool exact_arc_length = params_->FollowPath.optimizer.exact_arc_length;
+
+    const auto* conf1 = dynamic_cast<const VertexPose*>(_vertices[0]);
+    const auto* conf2 = dynamic_cast<const VertexPose*>(_vertices[1]);
+    const auto* dt = dynamic_cast<const VertexTimeDiff*>(_vertices[2]);
+
+    const Eigen::Vector2d delta_s = conf2->position() - conf1->position();
+    const double dist = delta_s.norm();
+    const double angle_diff = angles::normalize_angle(conf2->theta() - conf1->theta());
+
+    _jacobianOplus[0].setZero();
+    _jacobianOplus[1].setZero();
+    _jacobianOplus[2].setZero();
+    if (std::abs(dist) < 1e-12)
+      return;  // error is identically zero (phi == measurement)
+
+    // phi = sigma * atan(k), k = wheelbase/dist * g(angle_diff),
+    // sigma = fast_sigmoid(100 * s), s = delta . heading1
+    const double k = (wheelbase / dist) *
+      (exact_arc_length ? 2.0 * std::sin(angle_diff / 2.0) : angle_diff);
+    const double g_prime = exact_arc_length ? std::cos(angle_diff / 2.0) : 1.0;
+    const double psi = std::atan(k);
+    const double psi_d_dist = -k / (dist * (1.0 + k * k));
+    const double psi_d_angle = (wheelbase / dist) * g_prime / (1.0 + k * k);
+
+    const double cos1 = std::cos(conf1->theta());
+    const double sin1 = std::sin(conf1->theta());
+    const SigmoidTerm sig = makeSigmoidTerm(delta_s, cos1, sin1);
+    const double phi = sig.sigma * psi;
+
+    const double dev = penaltyBoundToIntervalDerivative(
+      angles::normalize_angle(phi - _measurement) / dt->dt(),
+      steering_rate_max, penalty_eps);
+    const double inv_dt = 1.0 / dt->dt();
+
+    const Eigen::Vector2d u = delta_s / dist;
+    // d(phi)/dp1 = sigma * psi_d_dist * (-u) + psi * sig.deriv * (-heading1)
+    // d(phi)/dp2 = sigma * psi_d_dist * ( u) + psi * sig.deriv * ( heading1)
+    // d(phi)/dtheta1 = sigma * psi_d_angle * (-1) + psi * sig.deriv * sig.rot1
+    // d(phi)/dtheta2 = sigma * psi_d_angle
+    _jacobianOplus[0](0, 0) = dev * inv_dt * (sig.sigma * psi_d_dist * (-u.x()) +
+      psi * sig.deriv * (-cos1));
+    _jacobianOplus[0](0, 1) = dev * inv_dt * (sig.sigma * psi_d_dist * (-u.y()) +
+      psi * sig.deriv * (-sin1));
+    _jacobianOplus[0](0, 2) = dev * inv_dt * (sig.sigma * psi_d_angle * (-1.0) +
+      psi * sig.deriv * sig.rot1);
+    _jacobianOplus[1](0, 0) = dev * inv_dt * (sig.sigma * psi_d_dist * u.x() +
+      psi * sig.deriv * cos1);
+    _jacobianOplus[1](0, 1) = dev * inv_dt * (sig.sigma * psi_d_dist * u.y() +
+      psi * sig.deriv * sin1);
+    _jacobianOplus[1](0, 2) = dev * inv_dt * (sig.sigma * psi_d_angle);
+    const double steer_rate = angles::normalize_angle(phi - _measurement) * inv_dt;
+    _jacobianOplus[2](0, 0) = dev * (-steer_rate * inv_dt);
+  }
+#endif  // USE_ANALYTIC_JACOBI
 
   void setInitialSteeringAngle(double steering_angle)
   {

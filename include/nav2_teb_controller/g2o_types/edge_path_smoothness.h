@@ -28,6 +28,8 @@ namespace nav2_teb_controller
 class EdgePathSmoothness : public BaseTebBinaryEdge<1 ,double, VertexPose, VertexPose>
 {
 public:
+  using BaseTebBinaryEdge<1 ,double, VertexPose, VertexPose>::linearizeOplus;
+
   /**
    * @brief Construct edge.
    */
@@ -50,6 +52,25 @@ public:
 
     // TEB_ASSERT_MSG(std::isfinite(_error[0]), "EdgePathSmoothness::computeError() _error[0]=%f\n", _error[0]);
   }
+
+  /**
+   * @brief Jacobi matrix of the cost function specified in computeError().
+   */
+#if USE_ANALYTIC_JACOBI
+  void linearizeOplus() override {
+    const auto *pose1 = dynamic_cast<const VertexPose*>(_vertices[0]);
+    const auto *pose2 = dynamic_cast<const VertexPose*>(_vertices[1]);
+    const double angle_diff = angles::normalize_angle(pose1->theta() - pose2->theta());
+
+    _jacobianOplusXi.setZero();
+    _jacobianOplusXj.setZero();
+    if (std::abs(angle_diff) < 1e-12)
+      return;  // non-differentiable point
+    const double sign = angle_diff > 0 ? 1.0 : -1.0;
+    _jacobianOplusXi(0, 2) =  sign;  // d e / d theta1
+    _jacobianOplusXj(0, 2) = -sign;  // d e / d theta2
+  }
+#endif  // USE_ANALYTIC_JACOBI
 
 
   EIGEN_MAKE_ALIGNED_OPERATOR_NEW

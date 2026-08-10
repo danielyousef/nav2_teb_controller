@@ -30,6 +30,8 @@ namespace nav2_teb_controller
 class EdgeTimeOptimal : public BaseTebUnaryEdge<1, double, VertexTimeDiff>
 {
 public:
+  using BaseTebUnaryEdge<1, double, VertexTimeDiff>::linearizeOplus;
+
     
   /**
    * @brief Construct edge.
@@ -52,16 +54,15 @@ public:
     // TEB_ASSERT_MSG(std::isfinite(_error[0]), "EdgeTimeOptimal::computeError() _error[0]=%f\n",_error[0]);
   }
 
-#ifdef USE_ANALYTIC_JACOBI
   /**
    * @brief Jacobi matrix of the cost function specified in computeError().
    */
-  void linearizeOplus()
+#if USE_ANALYTIC_JACOBI
+  void linearizeOplus() override
   {
-    // TEB_ASSERT_MSG(cfg_, "You must call setTebConfig on EdgeTimeOptimal()");
     _jacobianOplusXi( 0 , 0 ) = 1;
   }
-#endif
+#endif  // USE_ANALYTIC_JACOBI
   
   
        

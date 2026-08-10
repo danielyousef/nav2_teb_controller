@@ -5,6 +5,7 @@
 #include "nav2_teb_controller/g2o_types/vertex_timediff.h"
 #include "nav2_teb_controller/g2o_types/base_teb_edges.h"
 #include "nav2_teb_controller/g2o_types/penalties.h"
+#include "nav2_teb_controller/g2o_types/edge_kinodynamics_helpers.hpp"
 #include "nav2_teb_controller/core/pose_se2.hpp"
 #include "nav2_teb_controller/math_utils.hpp"
 
@@ -34,6 +35,8 @@ namespace nav2_teb_controller
 class EdgeStartSteeringAngle : public BaseTebMultiEdge<2, double>
 {
 public:
+  using BaseTebMultiEdge<2, double>::linearizeOplus;
+
   EdgeStartSteeringAngle()
   {
     this->resize(5); // p0, p1, p2, dt0, dt1
@@ -103,6 +106,101 @@ public:
     _error[1] = penaltyBoundFromBelow(steering_rate_max, std::abs(required_steering_rate2), penalty_eps);
     _error[1] = 0.0;
   }
+
+  /**
+   * @brief Jacobi matrix of the cost function specified in computeError().
+   *
+   * The second error component is identically zero, so only row 0 is filled.
+   * The 180-degree turn ambiguity correction is treated as locally constant
+   * (branch selection fixed under small perturbations).
+   */
+#if USE_ANALYTIC_JACOBI
+  void linearizeOplus() override
+  {
+    // read params
+    const double wheelbase = params_->FollowPath.robot.wheelbase;
+    const double steering_rate_max = params_->FollowPath.robot.steering_rate_max;
+    const double penalty_eps = params_->FollowPath.optimizer.penalty_epsilon;
+
+    const auto* p0 = dynamic_cast<const VertexPose*>(_vertices[0]);
+    const auto* p1 = dynamic_cast<const VertexPose*>(_vertices[1]);
+    const auto* dt0 = dynamic_cast<const VertexTimeDiff*>(_vertices[3]);
+
+    for (int i = 0; i < 5; ++i)
+      _jacobianOplus[i].setZero();
+    if (dt0->dt() <= 1e-6)
+      return;
+
+    // === Segment 1: p0 -> p1 (mirrors computeError) ===
+    const Eigen::Vector2d diff1 = p1->position() - p0->position();
+    const double dist1 = diff1.norm();
+    const double angle_diff1 = angles::normalize_angle(p1->theta() - p0->theta());
+
+    const double cos0 = std::cos(p0->theta());
+    const double sin0 = std::sin(p0->theta());
+    const SigmoidTerm sig = makeSigmoidTerm(diff1, cos0, sin0);
+    const double v_raw = dist1 / dt0->dt();
+    const double v = v_raw * sig.sigma;
+    const double omega = angle_diff1 / dt0->dt();
+
+    double steering_angle_cmd1 = 0.0;
+    if (std::abs(v) > 1e-5)
+      steering_angle_cmd1 = std::atan2(omega * wheelbase, v);
+    else if (std::abs(omega) > 1e-5)
+      steering_angle_cmd1 = (omega > 0) ? M_PI_2 : -M_PI_2;
+
+    if (std::abs(steering_angle_cmd1 - measured_steering_angle_) > M_PI_2)
+      steering_angle_cmd1 -= std::copysign(M_PI, steering_angle_cmd1);
+
+    const double r = angles::normalize_angle(steering_angle_cmd1 - measured_steering_angle_) / dt0->dt();
+    const double dev = (std::abs(r) + penalty_eps > steering_rate_max) ? 1.0 : 0.0;
+    if (dev == 0.0)
+      return;
+    const double sign_r = r > 0.0 ? 1.0 : (r < 0.0 ? -1.0 : 0.0);
+
+    // d(phi)/d(...) in the main atan2 branch (phi = atan2(omega*L, v))
+    double dphi_dtheta0 = 0.0, dphi_dtheta1 = 0.0, dphi_ddt = 0.0;
+    Eigen::Vector2d dphi_dp0 = Eigen::Vector2d::Zero();
+    Eigen::Vector2d dphi_dp1 = Eigen::Vector2d::Zero();
+    if (std::abs(v) > 1e-5)
+    {
+      const double y = omega * wheelbase;
+      const double denom = v * v + y * y;
+      // d(phi) = (v * d(y) - y * d(v)) / denom
+      const Eigen::Vector2d u = dist1 > 1e-12 ? Eigen::Vector2d(diff1 / dist1) :
+        Eigen::Vector2d::Zero();
+      // d(v)/dp0 = -sigma*u/dt - v_raw*sigma'*heading0
+      const Eigen::Vector2d dv_dp0 = -sig.sigma * u / dt0->dt() -
+        v_raw * sig.deriv * Eigen::Vector2d(cos0, sin0);
+      const Eigen::Vector2d dv_dp1 = sig.sigma * u / dt0->dt() +
+        v_raw * sig.deriv * Eigen::Vector2d(cos0, sin0);
+      dphi_dp0 = -y * dv_dp0 / denom;
+      dphi_dp1 = -y * dv_dp1 / denom;
+      // d(omega)/dtheta0 = -1/dt, d(omega)/dtheta1 = +1/dt
+      dphi_dtheta0 = (v * wheelbase * (-1.0 / dt0->dt()) - y * (v_raw * sig.deriv * sig.rot1)) / denom;
+      dphi_dtheta1 = (v * wheelbase * ( 1.0 / dt0->dt())) / denom;
+      // d(v)/ddt = -v/dt, d(omega)/ddt = -omega/dt
+      dphi_ddt = (v * wheelbase * (-omega / dt0->dt()) - y * (-v / dt0->dt())) / denom;
+    }
+
+    const double inv_dt = 1.0 / dt0->dt();
+    // d(|r|)/d(phi) = sign(r) / dt
+    const double coef = dev * sign_r * inv_dt;
+
+    // conf p0
+    _jacobianOplus[0](0, 0) = coef * dphi_dp0.x();
+    _jacobianOplus[0](0, 1) = coef * dphi_dp0.y();
+    _jacobianOplus[0](0, 2) = coef * dphi_dtheta0;
+    // conf p1
+    _jacobianOplus[1](0, 0) = coef * dphi_dp1.x();
+    _jacobianOplus[1](0, 1) = coef * dphi_dp1.y();
+    _jacobianOplus[1](0, 2) = coef * dphi_dtheta1;
+    // deltaT0 (r = phi_n / dt, so d r/ddt = d(phi)/ddt/dt - r/dt)
+    _jacobianOplus[3](0, 0) = dev * sign_r * (dphi_ddt / (dt0->dt() * dt0->dt()) -
+      r * inv_dt);
+    // p2 / deltaT1: no dependence
+  }
+#endif  // USE_ANALYTIC_JACOBI
 
   void setInitialSteeringAngle(double angle)
   {

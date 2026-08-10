@@ -27,6 +27,8 @@ namespace nav2_teb_controller
 class EdgeESDFObstacle : public BaseTebUnaryEdge<-1, Eigen::VectorXd, VertexPose>
 {
 public:
+  using BaseTebUnaryEdge<-1, Eigen::VectorXd, VertexPose>::linearizeOplus;
+
   EIGEN_MAKE_ALIGNED_OPERATOR_NEW
 
   /// Must be called before addEdge() — sets error dimension.
@@ -69,6 +71,62 @@ public:
     // ── Inflation penalty at robot center ────────────────────────────────────
     _error[_dimension - 1] = penaltyBoundFromBelow(esdf_->query(px, py).distance, inflation_dist, 0.0);
   }
+
+  /**
+   * @brief Jacobi matrix of the cost function specified in computeError().
+   *
+   * Row i: derivative of the per-circle obstacle penalty,
+   * Row N: derivative of the center inflation penalty.
+   * Uses the true (unnormalized) ESDF gradient.
+   */
+#if USE_ANALYTIC_JACOBI
+  void linearizeOplus() override
+  {
+    const double min_dist = params_->FollowPath.obstacles.min_obstacle_dist;
+    const double inflation_dist = params_->FollowPath.obstacles.inflation_dist;
+    const double exp_scale = params_->FollowPath.obstacles.cost_exponent;
+
+    const auto* vp = dynamic_cast<const VertexPose*>(this->_vertices[0]);
+
+    const double px = vp->x();
+    const double py = vp->y();
+    const double ct = std::cos(vp->theta());
+    const double st = std::sin(vp->theta());
+
+    _jacobianOplusXi.setZero();
+
+    // ── Per-circle obstacle penalty ─────────────────────────────────────────
+    const auto& circles = footprint_->circles();
+    for (int i = 0; i < static_cast<int>(circles.size()); ++i) {
+      const auto& c = circles[i];
+      const double wx = px + ct * c.offset.x() - st * c.offset.y();
+      const double wy = py + st * c.offset.x() + ct * c.offset.y();
+
+      const double dist = esdf_->query(wx, wy).distance;
+      const double threshold = min_dist + c.radius;
+      if (dist > threshold)
+        continue;  // penalty inactive
+
+      // d(e_i)/d(dist) = -1 - exp(alpha * (threshold - dist))
+      const double grad_mag = -1.0 - std::exp(exp_scale * (threshold - dist));
+      const Eigen::Vector2d grad = esdf_->gradient(wx, wy);
+      // d(w)/d(p) = I, d(w)/d(theta) = (-c.x*st - c.y*ct, c.x*ct - c.y*st)
+      _jacobianOplusXi(i, 0) = grad_mag * grad.x();
+      _jacobianOplusXi(i, 1) = grad_mag * grad.y();
+      _jacobianOplusXi(i, 2) = grad_mag * (grad.x() * (-c.offset.x() * st - c.offset.y() * ct) +
+                                           grad.y() * ( c.offset.x() * ct - c.offset.y() * st));
+    }
+
+    // ── Inflation penalty at robot center ───────────────────────────────────
+    const double center_dist = esdf_->query(px, py).distance;
+    if (center_dist < inflation_dist) {
+      const Eigen::Vector2d grad = esdf_->gradient(px, py);
+      _jacobianOplusXi(_dimension - 1, 0) = -grad.x();
+      _jacobianOplusXi(_dimension - 1, 1) = -grad.y();
+      // center offset is zero -> d(w)/d(theta) = 0
+    }
+  }
+#endif  // USE_ANALYTIC_JACOBI
 
   void setObstacle(const ObstacleMap2D& esdf) { esdf_ = &esdf; }
   void setFootprint(const Footprint& fp) { footprint_ = &fp;   }

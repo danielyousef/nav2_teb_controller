@@ -40,6 +40,8 @@ namespace nav2_teb_controller
 class EdgeAccelerationHolonomic : public BaseTebMultiEdge<3, double>
 {
 public:
+  using BaseTebMultiEdge<3, double>::linearizeOplus;
+
   /**
    * @brief Construct edge.
    */    
@@ -106,6 +108,95 @@ public:
     // TEB_ASSERT_MSG(std::isfinite(_error[1]), "EdgeAcceleration::computeError() strafing: _error[1]=%f\n",_error[1]);
     // TEB_ASSERT_MSG(std::isfinite(_error[2]), "EdgeAcceleration::computeError() rotational: _error[2]=%f\n",_error[2]);
   }
+
+  /**
+   * @brief Jacobi matrix of the cost function specified in computeError().
+   *
+   * Rows 0/1: translational (x/y) acceleration in the robot frame,
+   * Row 2: rotational acceleration.
+   */
+#if USE_ANALYTIC_JACOBI
+  void linearizeOplus() override
+  {
+    // read params
+    const double a_max_x = params_->FollowPath.robot.a_max_x;
+    const double a_max_y = params_->FollowPath.robot.a_max_y;
+    const double a_max_theta = params_->FollowPath.robot.a_max_theta;
+    const double penalty_eps = params_->FollowPath.optimizer.penalty_epsilon;
+
+    const auto* pose1 = dynamic_cast<const VertexPose*>(_vertices[0]);
+    const auto* pose2 = dynamic_cast<const VertexPose*>(_vertices[1]);
+    const auto* pose3 = dynamic_cast<const VertexPose*>(_vertices[2]);
+    const auto* dt1 = dynamic_cast<const VertexTimeDiff*>(_vertices[3]);
+    const auto* dt2 = dynamic_cast<const VertexTimeDiff*>(_vertices[4]);
+
+    const Eigen::Vector2d diff1 = pose2->position() - pose1->position();
+    const Eigen::Vector2d diff2 = pose3->position() - pose2->position();
+    const double cos1 = std::cos(pose1->theta());
+    const double sin1 = std::sin(pose1->theta());
+    const double cos2 = std::cos(pose2->theta());
+    const double sin2 = std::sin(pose2->theta());
+
+    // inverse 2d rotation matrices applied to the segment differences
+    const Eigen::Matrix2d rot1 = (Eigen::Matrix2d() << cos1, sin1, -sin1, cos1).finished();
+    const Eigen::Matrix2d rot2 = (Eigen::Matrix2d() << cos2, sin2, -sin2, cos2).finished();
+    const Eigen::Vector2d r1 = rot1 * diff1;
+    const Eigen::Vector2d r2 = rot2 * diff2;
+
+    const Eigen::Vector2d vel1 = r1 / dt1->dt();
+    const Eigen::Vector2d vel2 = r2 / dt2->dt();
+    const double omega1 = angles::normalize_angle(pose2->theta() - pose1->theta()) / dt1->dt();
+    const double omega2 = angles::normalize_angle(pose3->theta() - pose2->theta()) / dt2->dt();
+    const double sum_time = dt1->dt() + dt2->dt();
+    const Eigen::Vector2d acc = 2.0 * (vel2 - vel1) / sum_time;
+    const double acc_rot = 2.0 * (omega2 - omega1) / sum_time;
+
+    const double dev_x = penaltyBoundToIntervalDerivative(acc.x(), a_max_x, penalty_eps);
+    const double dev_y = penaltyBoundToIntervalDerivative(acc.y(), a_max_y, penalty_eps);
+    const double dev_rot = penaltyBoundToIntervalDerivative(acc_rot, a_max_theta, penalty_eps);
+
+    // d(r_i)/d theta_i = (r_i.y, -r_i.x)
+    const Eigen::Vector2d drot1 = Eigen::Vector2d(r1.y(), -r1.x());
+    const Eigen::Vector2d drot2 = Eigen::Vector2d(r2.y(), -r2.x());
+
+    _jacobianOplus[0].setZero();
+    _jacobianOplus[1].setZero();
+    _jacobianOplus[2].setZero();
+    _jacobianOplus[3].setZero();
+    _jacobianOplus[4].setZero();
+
+    // conf1
+    _jacobianOplus[0](0, 0) = dev_x * (2.0 / sum_time * rot1(0, 0) / dt1->dt());
+    _jacobianOplus[0](0, 1) = dev_x * (2.0 / sum_time * rot1(0, 1) / dt1->dt());
+    _jacobianOplus[0](1, 0) = dev_y * (2.0 / sum_time * rot1(1, 0) / dt1->dt());
+    _jacobianOplus[0](1, 1) = dev_y * (2.0 / sum_time * rot1(1, 1) / dt1->dt());
+    _jacobianOplus[0](0, 2) = dev_x * (-2.0 / sum_time * drot1.x() / dt1->dt());
+    _jacobianOplus[0](1, 2) = dev_y * (-2.0 / sum_time * drot1.y() / dt1->dt());
+    _jacobianOplus[0](2, 2) = dev_rot * (2.0 / (sum_time * dt1->dt()));
+    // conf2
+    _jacobianOplus[1](0, 0) = dev_x * (-2.0 / sum_time * (rot2(0, 0) / dt2->dt() + rot1(0, 0) / dt1->dt()));
+    _jacobianOplus[1](0, 1) = dev_x * (-2.0 / sum_time * (rot2(0, 1) / dt2->dt() + rot1(0, 1) / dt1->dt()));
+    _jacobianOplus[1](1, 0) = dev_y * (-2.0 / sum_time * (rot2(1, 0) / dt2->dt() + rot1(1, 0) / dt1->dt()));
+    _jacobianOplus[1](1, 1) = dev_y * (-2.0 / sum_time * (rot2(1, 1) / dt2->dt() + rot1(1, 1) / dt1->dt()));
+    _jacobianOplus[1](0, 2) = dev_x * (2.0 / sum_time * drot2.x() / dt2->dt());
+    _jacobianOplus[1](1, 2) = dev_y * (2.0 / sum_time * drot2.y() / dt2->dt());
+    _jacobianOplus[1](2, 2) = dev_rot * (2.0 / sum_time * (1.0 / dt1->dt() + 1.0 / dt2->dt()));
+    // conf3
+    _jacobianOplus[2](0, 0) = dev_x * (2.0 / sum_time * rot2(0, 0) / dt2->dt());
+    _jacobianOplus[2](0, 1) = dev_x * (2.0 / sum_time * rot2(0, 1) / dt2->dt());
+    _jacobianOplus[2](1, 0) = dev_y * (2.0 / sum_time * rot2(1, 0) / dt2->dt());
+    _jacobianOplus[2](1, 1) = dev_y * (2.0 / sum_time * rot2(1, 1) / dt2->dt());
+    _jacobianOplus[2](2, 2) = dev_rot * (2.0 / (sum_time * dt2->dt()));
+    // deltaT1
+    _jacobianOplus[3](0, 0) = dev_x * (2.0 / sum_time * vel1.x() / dt1->dt() - acc.x() / sum_time);
+    _jacobianOplus[3](1, 0) = dev_y * (2.0 / sum_time * vel1.y() / dt1->dt() - acc.y() / sum_time);
+    _jacobianOplus[3](2, 0) = dev_rot * (2.0 / sum_time * omega1 / dt1->dt() - acc_rot / sum_time);
+    // deltaT2
+    _jacobianOplus[4](0, 0) = dev_x * (-2.0 / sum_time * vel2.x() / dt2->dt() - acc.x() / sum_time);
+    _jacobianOplus[4](1, 0) = dev_y * (-2.0 / sum_time * vel2.y() / dt2->dt() - acc.y() / sum_time);
+    _jacobianOplus[4](2, 0) = dev_rot * (-2.0 / sum_time * omega2 / dt2->dt() - acc_rot / sum_time);
+  }
+#endif  // USE_ANALYTIC_JACOBI
 
   EIGEN_MAKE_ALIGNED_OPERATOR_NEW
 };

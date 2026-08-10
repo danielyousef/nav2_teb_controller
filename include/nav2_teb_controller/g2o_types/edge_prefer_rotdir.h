@@ -25,6 +25,8 @@ namespace nav2_teb_controller
 class EdgePreferRotDir : public BaseTebBinaryEdge<1, double, VertexPose, VertexPose>
 {
 public:
+  using BaseTebBinaryEdge<1, double, VertexPose, VertexPose>::linearizeOplus;
+
     
   /**
    * @brief Construct edge.

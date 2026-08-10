@@ -37,6 +37,8 @@ namespace nav2_teb_controller
 class EdgeG3Continuity : public BaseTebMultiEdge<1, std::nullptr_t>
 {
 public:
+  using BaseTebMultiEdge<1, std::nullptr_t>::linearizeOplus;
+
   /**
    * @brief Construct edge.
    */
@@ -104,6 +106,86 @@ public:
     // _error[0] = delta_phi;
     _error[0] = penaltyBoundFromBelow(steering_rate_max, steer_rate, penalty_eps);
   }
+
+  /**
+   * @brief Jacobi matrix of the cost function specified in computeError().
+   *
+   * Note: phi_i = atan(kappa_i * L) equals atan(delta_theta_i * L / dist_i)
+   * for both driving directions (the sign flips cancel), so the Jacobian is
+   * independent of the direction. The unwrap branch is treated as locally
+   * constant.
+   */
+#if USE_ANALYTIC_JACOBI
+  void linearizeOplus() override
+  {
+    // read params
+    const double wheelbase = params_->FollowPath.robot.wheelbase;
+    const double steering_rate_max = params_->FollowPath.robot.steering_rate_max;
+    const double penalty_eps = params_->FollowPath.optimizer.penalty_epsilon;
+
+    const auto* pose_prev = dynamic_cast<const VertexPose*>(_vertices[0]);
+    const auto* pose_curr = dynamic_cast<const VertexPose*>(_vertices[1]);
+    const auto* pose_next = dynamic_cast<const VertexPose*>(_vertices[2]);
+    const auto* dt1 = dynamic_cast<const VertexTimeDiff*>(_vertices[3]);
+    const auto* dt2 = dynamic_cast<const VertexTimeDiff*>(_vertices[4]);
+
+    const Eigen::Vector2d diff1 = pose_curr->position() - pose_prev->position();
+    const double dist1 = diff1.norm();
+    const Eigen::Vector2d diff2 = pose_next->position() - pose_curr->position();
+    const double dist2 = diff2.norm();
+
+    for (int i = 0; i < 5; ++i)
+      _jacobianOplus[i].setZero();
+    if (dist1 < 1e-4 || dist2 < 1e-4)
+      return;  // error is identically zero
+
+    const double a1 = angles::normalize_angle(pose_curr->theta() - pose_prev->theta());
+    const double a2 = angles::normalize_angle(pose_next->theta() - pose_curr->theta());
+
+    // phi_i = atan(L * a_i / dist_i)
+    const double k1 = wheelbase * a1 / dist1;
+    const double k2 = wheelbase * a2 / dist2;
+    const double dphi1_d_dist = -k1 / (dist1 * (1.0 + k1 * k1));
+    const double dphi2_d_dist = -k2 / (dist2 * (1.0 + k2 * k2));
+    const double dphi1_d_angle = wheelbase / (dist1 * (1.0 + k1 * k1));
+    const double dphi2_d_angle = wheelbase / (dist2 * (1.0 + k2 * k2));
+
+    const double phi1 = std::atan(k1);
+    const double phi2 = std::atan(k2);
+    const double phi2_ = unwrapSteeringAngle(phi2, phi1);
+    const double delta_phi = phi2_ - phi1;
+
+    const double avg_dt = 0.5 * (dt1->dt() + dt2->dt());
+    const double steer_rate = std::abs(delta_phi) / avg_dt;
+    const double dev = -penaltyBoundFromBelowDerivative(
+      steering_rate_max, steer_rate, penalty_eps);
+    const double sign_delta = delta_phi > 0.0 ? 1.0 : (delta_phi < 0.0 ? -1.0 : 0.0);
+    const double inv_avg_dt = 1.0 / avg_dt;
+
+    const Eigen::Vector2d u1 = diff1 / dist1;
+    const Eigen::Vector2d u2 = diff2 / dist2;
+
+    // d(steer_rate)/d(phi_i) = sign * (+/-1) / avg_dt (delta_phi = phi2_ - phi1)
+    // pose_prev: only via phi1 (position and heading)
+    _jacobianOplus[0](0, 0) = dev * sign_delta * inv_avg_dt * dphi1_d_dist * u1.x();
+    _jacobianOplus[0](0, 1) = dev * sign_delta * inv_avg_dt * dphi1_d_dist * u1.y();
+    _jacobianOplus[0](0, 2) = dev * sign_delta * inv_avg_dt * dphi1_d_angle;
+    // pose_curr
+    _jacobianOplus[1](0, 0) = dev * sign_delta * inv_avg_dt *
+      (-dphi1_d_dist * u1.x() - dphi2_d_dist * u2.x());
+    _jacobianOplus[1](0, 1) = dev * sign_delta * inv_avg_dt *
+      (-dphi1_d_dist * u1.y() - dphi2_d_dist * u2.y());
+    _jacobianOplus[1](0, 2) = dev * sign_delta * inv_avg_dt *
+      (-(dphi1_d_angle + dphi2_d_angle));
+    // pose_next
+    _jacobianOplus[2](0, 0) = dev * sign_delta * inv_avg_dt * dphi2_d_dist * u2.x();
+    _jacobianOplus[2](0, 1) = dev * sign_delta * inv_avg_dt * dphi2_d_dist * u2.y();
+    _jacobianOplus[2](0, 2) = dev * sign_delta * inv_avg_dt * dphi2_d_angle;
+    // deltaT1 / deltaT2
+    _jacobianOplus[3](0, 0) = dev * (-0.5 * inv_avg_dt * steer_rate);
+    _jacobianOplus[4](0, 0) = dev * (-0.5 * inv_avg_dt * steer_rate);
+  }
+#endif  // USE_ANALYTIC_JACOBI
 
 
   /// Pick the equivalent angle (φ or φ±π) closest to reference

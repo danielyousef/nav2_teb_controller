@@ -22,6 +22,8 @@ namespace nav2_teb_controller
  */
 class EdgeShortestPath : public BaseTebBinaryEdge<1, double, VertexPose, VertexPose> {
 public:
+  using BaseTebBinaryEdge<1, double, VertexPose, VertexPose>::linearizeOplus;
+
   /**
    * @brief Construct edge.
    */
@@ -38,6 +40,28 @@ public:
 
     // TEB_ASSERT_MSG(std::isfinite(_error[0]), "EdgeShortestPath::computeError() _error[0]=%f\n", _error[0]);
   }
+
+  /**
+   * @brief Jacobi matrix of the cost function specified in computeError().
+   */
+#if USE_ANALYTIC_JACOBI
+  void linearizeOplus() override {
+    const auto *pose1 = dynamic_cast<const VertexPose*>(_vertices[0]);
+    const auto *pose2 = dynamic_cast<const VertexPose*>(_vertices[1]);
+    const Eigen::Vector2d delta = pose2->position() - pose1->position();
+    const double dist = delta.norm();
+
+    _jacobianOplusXi.setZero();
+    _jacobianOplusXj.setZero();
+    if (dist < 1e-12)
+      return;  // non-differentiable point; zero gradient (matches g2o numeric behavior)
+    const Eigen::Vector2d unit = delta / dist;
+    _jacobianOplusXi(0, 0) = -unit.x();  // d e / d x1
+    _jacobianOplusXi(0, 1) = -unit.y();  // d e / d y1
+    _jacobianOplusXj(0, 0) =  unit.x();  // d e / d x2
+    _jacobianOplusXj(0, 1) =  unit.y();  // d e / d y2
+  }
+#endif  // USE_ANALYTIC_JACOBI
 
 
   EIGEN_MAKE_ALIGNED_OPERATOR_NEW

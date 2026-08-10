@@ -25,6 +25,8 @@ namespace nav2_teb_controller
 class EdgeViaPoint : public BaseTebUnaryEdge<1, const Eigen::Vector2d*, VertexPose>
 {
 public:
+  using BaseTebUnaryEdge<1, const Eigen::Vector2d*, VertexPose>::linearizeOplus;
+
     
   /**
    * @brief Construct edge.

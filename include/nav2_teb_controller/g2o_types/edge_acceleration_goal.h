@@ -5,6 +5,7 @@
 #include "nav2_teb_controller/g2o_types/vertex_timediff.h"
 #include "nav2_teb_controller/g2o_types/penalties.h"
 #include "nav2_teb_controller/g2o_types/base_teb_edges.h"
+#include "nav2_teb_controller/g2o_types/edge_kinodynamics_helpers.hpp"
 #include "nav2_teb_controller/math_utils.hpp"
 
 #include <geometry_msgs/msg/twist.hpp>
@@ -37,6 +38,8 @@ namespace nav2_teb_controller
 class EdgeAccelerationGoal : public BaseTebMultiEdge<2, const geometry_msgs::msg::Twist*>
 {
 public:
+  using BaseTebMultiEdge<2, const geometry_msgs::msg::Twist*>::linearizeOplus;
+
   /**
    * @brief Construct edge.
    */  
@@ -94,6 +97,63 @@ public:
     // TEB_ASSERT_MSG(std::isfinite(_error[0]), "EdgeAccelerationGoal::computeError() translational: _error[0]=%f\n",_error[0]);
     // TEB_ASSERT_MSG(std::isfinite(_error[1]), "EdgeAccelerationGoal::computeError() rotational: _error[1]=%f\n",_error[1]);
   }
+
+  /**
+   * @brief Jacobi matrix of the cost function specified in computeError().
+   */
+#if USE_ANALYTIC_JACOBI
+  void linearizeOplus() override
+  {
+    // read params
+    const double a_max_x = params_->FollowPath.robot.a_max_x;
+    const double a_max_theta = params_->FollowPath.robot.a_max_theta;
+    const double penalty_eps = params_->FollowPath.optimizer.penalty_epsilon;
+    const bool exact_arc_length = params_->FollowPath.optimizer.exact_arc_length;
+
+    const auto* pose_pre_goal = dynamic_cast<const VertexPose*>(_vertices[0]);
+    const auto* pose_goal = dynamic_cast<const VertexPose*>(_vertices[1]);
+    const auto* dt = dynamic_cast<const VertexTimeDiff*>(_vertices[2]);
+
+    const SegmentMotion seg = makeSegmentMotion(
+      pose_goal->position() - pose_pre_goal->position(), pose_pre_goal->theta(),
+      pose_goal->theta(), dt->dt(), exact_arc_length);
+    const SigmoidTerm sig = makeSigmoidTerm(seg.delta, seg.cos_i, seg.sin_i);
+
+    const double vel1 = seg.velRaw() * sig.sigma;
+    const double vel2 = _measurement->linear.x;
+    const double omega1 = seg.omega();
+    const double omega2 = _measurement->angular.z;
+    const double acc_lin = (vel2 - vel1) / dt->dt();
+    const double acc_rot = (omega2 - omega1) / dt->dt();
+
+    const double dev_lin = penaltyBoundToIntervalDerivative(acc_lin, a_max_x, penalty_eps);
+    const double dev_rot = penaltyBoundToIntervalDerivative(acc_rot, a_max_theta, penalty_eps);
+
+    const Eigen::Vector2d u = seg.unit();
+    const double dist = seg.d0 * seg.arc;
+    const double dvel1_dtheta1 =
+      seg.velRaw() * sig.deriv * sig.rot1 - sig.sigma * seg.d0 * seg.dh_da / dt->dt();
+    const double dvel1_dtheta2 = sig.sigma * seg.d0 * seg.dh_da / dt->dt();
+
+    _jacobianOplus[0].setZero();
+    _jacobianOplus[1].setZero();
+    _jacobianOplus[2].setZero();
+
+    // pre-goal pose
+    _jacobianOplus[0](0, 0) = dev_lin * (sig.sigma * seg.arc * u.x() + dist * sig.deriv * seg.cos_i) / (dt->dt() * dt->dt());
+    _jacobianOplus[0](0, 1) = dev_lin * (sig.sigma * seg.arc * u.y() + dist * sig.deriv * seg.sin_i) / (dt->dt() * dt->dt());
+    _jacobianOplus[0](0, 2) = dev_lin * (-dvel1_dtheta1 / dt->dt());
+    _jacobianOplus[0](1, 2) = dev_rot * (1.0 / (dt->dt() * dt->dt()));
+    // goal pose
+    _jacobianOplus[1](0, 0) = dev_lin * (-sig.sigma * seg.arc * u.x() - dist * sig.deriv * seg.cos_i) / (dt->dt() * dt->dt());
+    _jacobianOplus[1](0, 1) = dev_lin * (-sig.sigma * seg.arc * u.y() - dist * sig.deriv * seg.sin_i) / (dt->dt() * dt->dt());
+    _jacobianOplus[1](0, 2) = dev_lin * (-dvel1_dtheta2 / dt->dt());
+    _jacobianOplus[1](1, 2) = dev_rot * (-1.0 / (dt->dt() * dt->dt()));
+    // deltaT
+    _jacobianOplus[2](0, 0) = dev_lin * ((vel1 / dt->dt() - acc_lin) / dt->dt());
+    _jacobianOplus[2](1, 0) = dev_rot * ((omega1 / dt->dt() - acc_rot) / dt->dt());
+  }
+#endif  // USE_ANALYTIC_JACOBI
     
   /**
    * @brief Set the goal / final velocity that is taken into account for calculating the acceleration

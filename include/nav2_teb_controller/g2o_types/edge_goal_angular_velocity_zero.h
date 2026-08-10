@@ -30,6 +30,8 @@ namespace nav2_teb_controller
 class EdgeGoalAngularVelocityZero : public BaseTebMultiEdge<1, double>
 {
 public:
+  using BaseTebMultiEdge<1, double>::linearizeOplus;
+
   EdgeGoalAngularVelocityZero()
   {
     // 9 vertices: 5 poses and 4 time diffs
@@ -107,6 +109,140 @@ public:
 
     // TEB_ASSERT_MSG(std::isfinite(_error[0]), "EdgeGoalAngularVelocityZero::computeError() _error[0]=%f\n", _error[0]);
   }
+
+  /**
+   * @brief Jacobi matrix of the cost function specified in computeError().
+   *
+   * omega is the least-squares slope over the (t, theta) window (linear in
+   * theta, nonlinear in t); v is the window-averaged translational velocity.
+   * The theta recursion theta[k] = theta[k-1] + normalize(pose + theta[k-1])
+   * has derivative 2 w.r.t. the previous cumulative angle.
+   */
+#if USE_ANALYTIC_JACOBI
+  void linearizeOplus() override
+  {
+    const double wheelbase = params_->FollowPath.robot.wheelbase;
+
+    const auto* pose_n_minus_4 = dynamic_cast<const VertexPose*>(_vertices[0]);
+    const auto* pose_n_minus_3 = dynamic_cast<const VertexPose*>(_vertices[1]);
+    const auto* pose_n_minus_2 = dynamic_cast<const VertexPose*>(_vertices[2]);
+    const auto* pose_n_minus_1 = dynamic_cast<const VertexPose*>(_vertices[3]);
+    const auto* pose_n = dynamic_cast<const VertexPose*>(_vertices[4]);
+
+    const auto* dt_n_minus_4 = dynamic_cast<const VertexTimeDiff*>(_vertices[5]);
+    const auto* dt_n_minus_3 = dynamic_cast<const VertexTimeDiff*>(_vertices[6]);
+    const auto* dt_n_minus_2 = dynamic_cast<const VertexTimeDiff*>(_vertices[7]);
+    const auto* dt_n_minus_1 = dynamic_cast<const VertexTimeDiff*>(_vertices[8]);
+
+    for (int i = 0; i < 9; ++i)
+      _jacobianOplus[i].setZero();
+
+    std::vector<double> t(5);
+    std::vector<double> theta(5);
+    t[0] = 0;
+    theta[0] = pose_n_minus_4->theta();
+    t[1] = dt_n_minus_4->dt();
+    theta[1] = theta[0] + angles::normalize_angle(pose_n_minus_3->theta() + theta[0]);
+    t[2] = t[1] + dt_n_minus_3->dt();
+    theta[2] = theta[1] + angles::normalize_angle(pose_n_minus_2->theta() + theta[1]);
+    t[3] = t[2] + dt_n_minus_2->dt();
+    theta[3] = theta[2] + angles::normalize_angle(pose_n_minus_1->theta() + theta[2]);
+    t[4] = t[3] + dt_n_minus_1->dt();
+    theta[4] = theta[3] + angles::normalize_angle(pose_n->theta() + theta[3]);
+
+    const double total_dist =
+      (pose_n_minus_3->position() - pose_n_minus_4->position()).norm() +
+      (pose_n_minus_2->position() - pose_n_minus_3->position()).norm() +
+      (pose_n_minus_1->position() - pose_n_minus_2->position()).norm() +
+      (pose_n->position() - pose_n_minus_1->position()).norm();
+    const double total_time = t[4];
+
+    if (total_time < 1e-6)
+      return;
+    const double v = total_dist / total_time;
+    if (std::abs(v) < 1e-4)
+      return;
+
+    Eigen::Matrix<double, 5, 2> A_rot;
+    Eigen::Matrix<double, 5, 1> B_rot;
+    for (int i = 0; i < 5; ++i) {
+      A_rot(i, 0) = 1.0;
+      A_rot(i, 1) = t[i];
+      B_rot(i, 0) = theta[i];
+    }
+    const double omega = A_rot.colPivHouseholderQr().solve(B_rot)[1];
+    const Eigen::Matrix<double, 2, 5> pinv =
+      A_rot.completeOrthogonalDecomposition().pseudoInverse();
+
+    // d omega / d theta_pose_j = sum_k pinv(1,k) * d theta[k]/d theta_pose_j
+    // with the recursion derivative chain (2^m factors).
+    const double dw_dtheta[5] = {
+      pinv(1, 0) + 2.0 * pinv(1, 1) + 4.0 * pinv(1, 2) + 8.0 * pinv(1, 3) + 16.0 * pinv(1, 4),
+      pinv(1, 1) + 2.0 * pinv(1, 2) + 4.0 * pinv(1, 3) + 8.0 * pinv(1, 4),
+      pinv(1, 2) + 2.0 * pinv(1, 3) + 4.0 * pinv(1, 4),
+      pinv(1, 3) + 2.0 * pinv(1, 4),
+      pinv(1, 4)};
+
+    // d omega / d dt_m: omega = sum_k w_k theta_k with w_k = (t_k - t_mean)/S
+    // and S = sum_k (t_k - t_mean)^2; theta is independent of the dt's, so
+    //   d omega/d dt_m = [sum_{k>=m+1} theta_k - (4-m)/5 * sum_k theta_k
+    //                      - omega * dS/d dt_m] / S
+    // with dS/d dt_m = 2 * sum_k (t_k - t_mean) * (I[k >= m+1] - (4-m)/5).
+    const double t_mean = (t[1] + t[2] + t[3] + t[4]) / 5.0;
+    double S = 0.0;
+    for (int i = 0; i < 5; ++i) S += (t[i] - t_mean) * (t[i] - t_mean);
+    double sum_theta = 0.0;
+    for (int i = 0; i < 5; ++i) sum_theta += theta[i];
+    double dw_ddt[4];
+    for (int m = 0; m < 4; ++m) {
+      const double dt_mean_m = (4.0 - m) / 5.0;
+      double sum_theta_tail = 0.0;
+      double dS = 0.0;
+      for (int k = m + 1; k < 5; ++k) {
+        sum_theta_tail += theta[k];
+        dS += (t[k] - t_mean) * (1.0 - dt_mean_m);
+      }
+      for (int k = 0; k <= m; ++k) dS -= (t[k] - t_mean) * dt_mean_m;
+      dS *= 2.0;
+      dw_ddt[m] = (sum_theta_tail - dt_mean_m * sum_theta - omega * dS) / S;
+    }
+
+    // position partials of the average velocity
+    const Eigen::Vector2d diff[4] = {
+      pose_n_minus_3->position() - pose_n_minus_4->position(),
+      pose_n_minus_2->position() - pose_n_minus_3->position(),
+      pose_n_minus_1->position() - pose_n_minus_2->position(),
+      pose_n->position() - pose_n_minus_1->position()};
+    const double dist[4] = {diff[0].norm(), diff[1].norm(), diff[2].norm(), diff[3].norm()};
+    const Eigen::Vector2d u[4] = {
+      dist[0] > 1e-12 ? Eigen::Vector2d(diff[0] / dist[0]) : Eigen::Vector2d::Zero(),
+      dist[1] > 1e-12 ? Eigen::Vector2d(diff[1] / dist[1]) : Eigen::Vector2d::Zero(),
+      dist[2] > 1e-12 ? Eigen::Vector2d(diff[2] / dist[2]) : Eigen::Vector2d::Zero(),
+      dist[3] > 1e-12 ? Eigen::Vector2d(diff[3] / dist[3]) : Eigen::Vector2d::Zero()};
+    const Eigen::Vector2d dv_dp[5] = {
+      -u[0] / total_time,
+      (u[0] - u[1]) / total_time,
+      (u[1] - u[2]) / total_time,
+      (u[2] - u[3]) / total_time,
+      u[3] / total_time};
+    const double dv_ddt = -v / total_time;
+
+    // steering = atan2(omega * L, v): d steering = (v*L*d(omega) - omega*L*d(v)) / (v^2 + omega^2 L^2)
+    const double y = omega * wheelbase;
+    const double denom = v * v + y * y;
+    const double coef_omega = v * wheelbase / denom;
+    const double coef_v = -y / denom;
+
+    for (int j = 0; j < 5; ++j) {
+      _jacobianOplus[j](0, 0) = coef_v * dv_dp[j].x();
+      _jacobianOplus[j](0, 1) = coef_v * dv_dp[j].y();
+      _jacobianOplus[j](0, 2) = coef_omega * dw_dtheta[j];
+    }
+    for (int m = 0; m < 4; ++m) {
+      _jacobianOplus[5 + m](0, 0) = coef_omega * dw_ddt[m] + coef_v * dv_ddt;
+    }
+  }
+#endif  // USE_ANALYTIC_JACOBI
 
 
   EIGEN_MAKE_ALIGNED_OPERATOR_NEW

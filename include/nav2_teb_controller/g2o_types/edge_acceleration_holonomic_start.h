@@ -41,6 +41,8 @@ namespace nav2_teb_controller
 class EdgeAccelerationHolonomicStart : public BaseTebMultiEdge<3, const geometry_msgs::msg::Twist*>
 {
 public:
+  using BaseTebMultiEdge<3, const geometry_msgs::msg::Twist*>::linearizeOplus;
+
   /**
    * @brief Construct edge.
    */   
@@ -97,6 +99,71 @@ public:
     // TEB_ASSERT_MSG(std::isfinite(_error[1]), "EdgeAccelerationStart::computeError() strafing: _error[1]=%f\n",_error[1]);
     // TEB_ASSERT_MSG(std::isfinite(_error[2]), "EdgeAccelerationStart::computeError() rotational: _error[2]=%f\n",_error[2]);
   }
+
+  /**
+   * @brief Jacobi matrix of the cost function specified in computeError().
+   */
+#if USE_ANALYTIC_JACOBI
+  void linearizeOplus() override
+  {
+    // read params
+    const double a_max_x = params_->FollowPath.robot.a_max_x;
+    const double a_max_y = params_->FollowPath.robot.a_max_y;
+    const double a_max_theta = params_->FollowPath.robot.a_max_theta;
+    const double penalty_eps = params_->FollowPath.optimizer.penalty_epsilon;
+
+    const auto* pose1 = dynamic_cast<const VertexPose*>(_vertices[0]);
+    const auto* pose2 = dynamic_cast<const VertexPose*>(_vertices[1]);
+    const auto* dt = dynamic_cast<const VertexTimeDiff*>(_vertices[2]);
+
+    const Eigen::Vector2d diff = pose2->position() - pose1->position();
+    const double cos1 = std::cos(pose1->theta());
+    const double sin1 = std::sin(pose1->theta());
+
+    // inverse 2d rotation matrix applied to the segment difference
+    const Eigen::Matrix2d rot1 = (Eigen::Matrix2d() << cos1, sin1, -sin1, cos1).finished();
+    const Eigen::Vector2d r1 = rot1 * diff;
+
+    const double vel1_x = _measurement->linear.x;
+    const double vel1_y = _measurement->linear.y;
+    const Eigen::Vector2d vel2 = r1 / dt->dt();
+    const double omega1 = _measurement->angular.z;
+    const double omega2 = angles::normalize_angle(pose2->theta() - pose1->theta()) / dt->dt();
+    const Eigen::Vector2d acc = (vel2 - Eigen::Vector2d(vel1_x, vel1_y)) / dt->dt();
+    const double acc_rot = (omega2 - omega1) / dt->dt();
+
+    const double dev_x = penaltyBoundToIntervalDerivative(acc.x(), a_max_x, penalty_eps);
+    const double dev_y = penaltyBoundToIntervalDerivative(acc.y(), a_max_y, penalty_eps);
+    const double dev_rot = penaltyBoundToIntervalDerivative(acc_rot, a_max_theta, penalty_eps);
+
+    // d(r1)/d theta1 = (r1.y, -r1.x)
+    const Eigen::Vector2d drot1(r1.y(), -r1.x());
+    const double inv_dt2 = 1.0 / (dt->dt() * dt->dt());
+
+    _jacobianOplus[0].setZero();
+    _jacobianOplus[1].setZero();
+    _jacobianOplus[2].setZero();
+
+    // conf1
+    _jacobianOplus[0](0, 0) = dev_x * (-rot1(0, 0) * inv_dt2);
+    _jacobianOplus[0](0, 1) = dev_x * (-rot1(0, 1) * inv_dt2);
+    _jacobianOplus[0](1, 0) = dev_y * (-rot1(1, 0) * inv_dt2);
+    _jacobianOplus[0](1, 1) = dev_y * (-rot1(1, 1) * inv_dt2);
+    _jacobianOplus[0](0, 2) = dev_x * (drot1.x() * inv_dt2);
+    _jacobianOplus[0](1, 2) = dev_y * (drot1.y() * inv_dt2);
+    _jacobianOplus[0](2, 2) = dev_rot * (-inv_dt2);
+    // conf2
+    _jacobianOplus[1](0, 0) = dev_x * (rot1(0, 0) * inv_dt2);
+    _jacobianOplus[1](0, 1) = dev_x * (rot1(0, 1) * inv_dt2);
+    _jacobianOplus[1](1, 0) = dev_y * (rot1(1, 0) * inv_dt2);
+    _jacobianOplus[1](1, 1) = dev_y * (rot1(1, 1) * inv_dt2);
+    _jacobianOplus[1](2, 2) = dev_rot * (inv_dt2);
+    // deltaT
+    _jacobianOplus[2](0, 0) = dev_x * (-acc.x() / dt->dt() - vel2.x() * inv_dt2);
+    _jacobianOplus[2](1, 0) = dev_y * (-acc.y() / dt->dt() - vel2.y() * inv_dt2);
+    _jacobianOplus[2](2, 0) = dev_rot * (-acc_rot / dt->dt() - omega2 * inv_dt2);
+  }
+#endif  // USE_ANALYTIC_JACOBI
   
   /**
    * @brief Set the initial velocity that is taken into account for calculating the acceleration

@@ -30,6 +30,8 @@ namespace nav2_teb_controller
 class EdgeJerk : public BaseTebMultiEdge<2, double>
 {
 public:
+  using BaseTebMultiEdge<2, double>::linearizeOplus;
+
   EdgeJerk()
   {
     this->resize(7); // 4 Poses, 3 TimeDiffs

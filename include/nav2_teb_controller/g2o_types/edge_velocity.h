@@ -35,6 +35,8 @@ namespace nav2_teb_controller
 class EdgeVelocity : public BaseTebMultiEdge<2, double>
 {
 public:
+  using BaseTebMultiEdge<2, double>::linearizeOplus;
+
   
   /**
    * @brief Construct edge.
@@ -83,79 +85,93 @@ public:
     // TEB_ASSERT_MSG(std::isfinite(_error[0]), "EdgeVelocity::computeError() _error[0]=%f _error[1]=%f\n",_error[0],_error[1]);
   }
 
-#ifdef USE_ANALYTIC_JACOBI
-#if 0 //TODO the hardcoded jacobian does not include the changing direction (just the absolute value)
-      // Change accordingly...
-
   /**
    * @brief Jacobi matrix of the cost function specified in computeError().
+   *
+   * Full analytic Jacobian including the direction term (fast_sigmoid) and the
+   * exact-arc-length variant of the translational velocity.
    */
-  void linearizeOplus()
+#if USE_ANALYTIC_JACOBI
+  void linearizeOplus() override
   {
-    TEB_ASSERT_MSG(params_.FollowPath."You must call setTebConfig on EdgeVelocity()");
-    const VertexPose* conf1 = static_cast<const VertexPose*>(_vertices[0]);
-    const VertexPose* conf2 = static_cast<const VertexPose*>(_vertices[1]);
-    const VertexTimeDiff* deltaT = static_cast<const VertexTimeDiff*>(_vertices[2]);
-    
-    Eigen::Vector2d deltaS = conf2->position() - conf1->position();
-    double dist = deltaS.norm();
-    double aux1 = dist*deltaT->estimate();
-    double aux2 = 1/deltaT->estimate();
-    
-    double vel = dist * aux2;
-    double omega = g2o::normalize_theta(conf2->theta() - conf1->theta()) * aux2;
-    
-    double dev_border_vel = penaltyBoundToIntervalDerivative(vel, -v_max_x_backwards, v_max_x, penalty_eps);
-    double dev_border_omega = penaltyBoundToIntervalDerivative(omega, v_max_theta, penalty_eps);
-    
-    _jacobianOplus[0].resize(2,3); // conf1
-    _jacobianOplus[1].resize(2,3); // conf2
-    _jacobianOplus[2].resize(2,1); // deltaT
-    
-//  if (aux1==0) aux1=1e-6;
-//  if (aux2==0) aux2=1e-6;
-    
-    if (dev_border_vel!=0)
+    // read params
+    const double v_max_x = params_->FollowPath.robot.v_max_x;
+    const double v_max_x_backwards = params_->FollowPath.robot.v_max_x_backwards;
+    const double v_max_theta = params_->FollowPath.robot.v_max_theta;
+    const double penalty_eps = params_->FollowPath.optimizer.penalty_epsilon;
+    const bool exact_arc_length = params_->FollowPath.optimizer.exact_arc_length;
+
+    const auto* conf1 = dynamic_cast<const VertexPose*>(_vertices[0]);
+    const auto* conf2 = dynamic_cast<const VertexPose*>(_vertices[1]);
+    const auto* deltaT = dynamic_cast<const VertexTimeDiff*>(_vertices[2]);
+
+    const Eigen::Vector2d deltaS = conf2->position() - conf1->position();
+    const double d0 = deltaS.norm();
+    const double angle_diff = angles::normalize_angle(conf2->theta() - conf1->theta());
+    const double dt = deltaT->estimate();
+    const double cos1 = std::cos(conf1->theta());
+    const double sin1 = std::sin(conf1->theta());
+
+    // translational distance (optionally the exact arc length)
+    double d = d0;
+    double arc_factor = 1.0;    // d(arc)/d(d0) scaling
+    double dh_da = 0.0;         // d(arc/d0)/d(angle_diff) for the exact variant
+    if (exact_arc_length && angle_diff != 0.0 && d0 > 1e-12)
     {
-      double aux3 = dev_border_vel / aux1;
-      _jacobianOplus[0](0,0) = -deltaS[0] * aux3; // vel x1
-      _jacobianOplus[0](0,1) = -deltaS[1] * aux3; // vel y1	
-      _jacobianOplus[1](0,0) = deltaS[0] * aux3; // vel x2
-      _jacobianOplus[1](0,1) = deltaS[1] * aux3; // vel y2
-      _jacobianOplus[2](0,0) = -vel * aux2 * dev_border_vel; // vel deltaT
-    }
-    else
-    {
-      _jacobianOplus[0](0,0) = 0; // vel x1
-      _jacobianOplus[0](0,1) = 0; // vel y1	
-      _jacobianOplus[1](0,0) = 0; // vel x2
-      _jacobianOplus[1](0,1) = 0; // vel y2	
-      _jacobianOplus[2](0,0) = 0; // vel deltaT
-    }
-    
-    if (dev_border_omega!=0)
-    {
-      double aux4 = aux2 * dev_border_omega;
-      _jacobianOplus[2](1,0) = -omega * aux4; // omega deltaT
-      _jacobianOplus[0](1,2) = -aux4; // omega angle1
-      _jacobianOplus[1](1,2) = aux4; // omega angle2
-    }
-    else
-    {
-      _jacobianOplus[2](1,0) = 0; // omega deltaT
-      _jacobianOplus[0](1,2) = 0; // omega angle1
-      _jacobianOplus[1](1,2) = 0; // omega angle2			
+      const double half = angle_diff / 2.0;
+      const double s_half = std::sin(half);
+      const double h = std::abs(angle_diff) / (2.0 * std::abs(s_half));
+      d = d0 * h;
+      arc_factor = h;
+      dh_da = std::copysign(1.0, angle_diff) / (2.0 * std::abs(s_half)) -
+              std::abs(angle_diff) * std::copysign(1.0, s_half) * std::cos(half) /
+              (4.0 * s_half * s_half);
     }
 
-    _jacobianOplus[0](1,0) = 0; // omega x1
-    _jacobianOplus[0](1,1) = 0; // omega y1
-    _jacobianOplus[1](1,0) = 0; // omega x2
-    _jacobianOplus[1](1,1) = 0; // omega y2
-    _jacobianOplus[0](0,2) = 0; // vel angle1
-    _jacobianOplus[1](0,2) = 0; // vel angle2
+    const double vel_raw = d / dt;
+    // direction term (movement aligned with the robot heading)
+    const double s_dir = deltaS.x() * cos1 + deltaS.y() * sin1;
+    const double sigma = fast_sigmoid(100.0 * s_dir);
+    const double sig_deriv = 100.0 / ((1.0 + 100.0 * std::abs(s_dir)) * (1.0 + 100.0 * std::abs(s_dir)));
+    const double vel = vel_raw * sigma;
+    const double omega = angle_diff / dt;
+
+    const double dev_vel = penaltyBoundToIntervalDerivative(
+      vel, -v_max_x_backwards, v_max_x, penalty_eps);
+    const double dev_omega = penaltyBoundToIntervalDerivative(
+      omega, v_max_theta, penalty_eps);
+
+    _jacobianOplus[0].setZero();
+    _jacobianOplus[1].setZero();
+    _jacobianOplus[2].setZero();
+
+    // --- Row 0: translational velocity ---
+    const double pos_factor = d0 > 1e-12 ? arc_factor / (d0 * dt) : 0.0;
+    const double extra_theta = exact_arc_length ? d0 * dh_da / dt : 0.0;
+
+    // conf1 (p): d(vel)/dp = sigma * d(vel_raw)/dp + vel_raw * sig' * d(s_dir)/dp
+    _jacobianOplus[0](0, 0) = dev_vel *
+      (-sigma * deltaS.x() * pos_factor - vel_raw * sig_deriv * cos1);
+    _jacobianOplus[0](0, 1) = dev_vel *
+      (-sigma * deltaS.y() * pos_factor - vel_raw * sig_deriv * sin1);
+    _jacobianOplus[0](0, 2) = dev_vel *
+      (vel_raw * sig_deriv * (deltaS.y() * cos1 - deltaS.x() * sin1) -
+       sigma * extra_theta);
+    // conf2 (q)
+    _jacobianOplus[1](0, 0) = dev_vel *
+      (sigma * deltaS.x() * pos_factor + vel_raw * sig_deriv * cos1);
+    _jacobianOplus[1](0, 1) = dev_vel *
+      (sigma * deltaS.y() * pos_factor + vel_raw * sig_deriv * sin1);
+    _jacobianOplus[1](0, 2) = dev_vel * sigma * extra_theta;
+    // deltaT
+    _jacobianOplus[2](0, 0) = dev_vel * (-vel / dt);
+
+    // --- Row 1: rotational velocity ---
+    _jacobianOplus[0](1, 2) = -dev_omega / dt;   // omega theta1
+    _jacobianOplus[1](1, 2) =  dev_omega / dt;   // omega theta2
+    _jacobianOplus[2](1, 0) = -omega * dev_omega / dt;  // omega deltaT
   }
-#endif
-#endif
+#endif  // USE_ANALYTIC_JACOBI
  
   
 

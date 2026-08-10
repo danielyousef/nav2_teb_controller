@@ -26,6 +26,8 @@ struct Obstacle {
 class EdgeCostmapObstacle : public BaseTebUnaryEdge<2, std::nullptr_t, VertexPose>
 {
 public:
+  using BaseTebUnaryEdge<2, std::nullptr_t, VertexPose>::linearizeOplus;
+
   void computeError() override
   {
     const auto* vp = dynamic_cast<const VertexPose*>(_vertices[0]);

@@ -5,6 +5,7 @@
 #include "nav2_teb_controller/g2o_types/vertex_timediff.h"
 #include "nav2_teb_controller/g2o_types/base_teb_edges.h"
 #include "nav2_teb_controller/g2o_types/penalties.h"
+#include "nav2_teb_controller/g2o_types/edge_kinodynamics_helpers.hpp"
 #include "nav2_teb_controller/core/pose_se2.hpp"
 #include "nav2_teb_controller/math_utils.hpp"
 
@@ -46,6 +47,8 @@ namespace nav2_teb_controller
 class EdgeJerk : public BaseTebMultiEdge<2, double>
 {
 public:
+  using BaseTebMultiEdge<2, double>::linearizeOplus;
+
   
   /**
    * @brief Construct edge
@@ -144,6 +147,112 @@ public:
 
     _error[1] = penaltyBoundToInterval(jerk_rot, jerk_max_theta, penalty_eps);
   }
+
+  /**
+   * @brief Jacobi matrix of the cost function specified in computeError().
+   *
+   * Row 0: translational jerk, Row 1: rotational jerk. Reuses the
+   * acceleration-pair partials of the shared kinodynamics helpers.
+   */
+#if USE_ANALYTIC_JACOBI
+  void linearizeOplus() override
+  {
+    // read params
+    const double jerk_max_x = params_->FollowPath.robot.jerk_max_x;
+    const double jerk_max_theta = params_->FollowPath.robot.jerk_max_theta;
+    const double penalty_eps = params_->FollowPath.optimizer.penalty_epsilon;
+    const bool exact_arc_length = params_->FollowPath.optimizer.exact_arc_length;
+
+    const auto* pose1 = dynamic_cast<const VertexPose*>(_vertices[0]);
+    const auto* pose2 = dynamic_cast<const VertexPose*>(_vertices[1]);
+    const auto* pose3 = dynamic_cast<const VertexPose*>(_vertices[2]);
+    const auto* pose4 = dynamic_cast<const VertexPose*>(_vertices[3]);
+    const auto* dt1 = dynamic_cast<const VertexTimeDiff*>(_vertices[4]);
+    const auto* dt2 = dynamic_cast<const VertexTimeDiff*>(_vertices[5]);
+    const auto* dt3 = dynamic_cast<const VertexTimeDiff*>(_vertices[6]);
+
+    const SegmentMotion seg1 = makeSegmentMotion(
+      pose2->position() - pose1->position(), pose1->theta(), pose2->theta(),
+      dt1->dt(), exact_arc_length);
+    const SegmentMotion seg2 = makeSegmentMotion(
+      pose3->position() - pose2->position(), pose2->theta(), pose3->theta(),
+      dt2->dt(), exact_arc_length);
+    const SegmentMotion seg3 = makeSegmentMotion(
+      pose4->position() - pose3->position(), pose3->theta(), pose4->theta(),
+      dt3->dt(), exact_arc_length);
+    const SigmoidTerm sig1 = makeSigmoidTerm(seg1.delta, seg1.cos_i, seg1.sin_i);
+    const SigmoidTerm sig2 = makeSigmoidTerm(seg2.delta, seg2.cos_i, seg2.sin_i);
+    const SigmoidTerm sig3 = makeSigmoidTerm(seg3.delta, seg3.cos_i, seg3.sin_i);
+
+    const double vel1 = seg1.velRaw() * sig1.sigma;
+    const double vel2 = seg2.velRaw() * sig2.sigma;
+    const double vel3 = seg3.velRaw() * sig3.sigma;
+    const double omega1 = seg1.omega();
+    const double omega2 = seg2.omega();
+    const double omega3 = seg3.omega();
+
+    const AccelPairGrads pair1 = makeAccelPairGrads(
+      seg1, sig1, vel1, omega1, seg2, sig2, vel2, omega2);
+    const AccelPairGrads pair2 = makeAccelPairGrads(
+      seg2, sig2, vel2, omega2, seg3, sig3, vel3, omega3);
+
+    const double dt1v = dt1->dt();
+    const double dt2v = dt2->dt();
+    const double dt3v = dt3->dt();
+    const double denom = (dt1v + 2.0 * dt2v + dt3v) / 4.0;
+    const double jerk_lin = (pair2.a_lin - pair1.a_lin) / denom;
+    const double jerk_rot = (pair2.a_rot - pair1.a_rot) / denom;
+
+    const double dev_lin = penaltyBoundToIntervalDerivative(
+      jerk_lin, jerk_max_x, penalty_eps);
+    const double dev_rot = penaltyBoundToIntervalDerivative(
+      jerk_rot, jerk_max_theta, penalty_eps);
+
+    _jacobianOplus[0].setZero();
+    _jacobianOplus[1].setZero();
+    _jacobianOplus[2].setZero();
+    _jacobianOplus[3].setZero();
+    _jacobianOplus[4].setZero();
+    _jacobianOplus[5].setZero();
+    _jacobianOplus[6].setZero();
+
+    // conf1
+    _jacobianOplus[0].block<1, 3>(0, 0) =
+      dev_lin * (-pair1.lin_pose[0].transpose()) / denom;
+    _jacobianOplus[0].block<1, 3>(1, 0) =
+      dev_rot * (-pair1.rot_pose[0].transpose()) / denom;
+    // conf2
+    _jacobianOplus[1].block<1, 3>(0, 0) =
+      dev_lin * ((pair2.lin_pose[0] - pair1.lin_pose[1]).transpose()) / denom;
+    _jacobianOplus[1].block<1, 3>(1, 0) =
+      dev_rot * ((pair2.rot_pose[0] - pair1.rot_pose[1]).transpose()) / denom;
+    // conf3
+    _jacobianOplus[2].block<1, 3>(0, 0) =
+      dev_lin * ((pair2.lin_pose[1] - pair1.lin_pose[2]).transpose()) / denom;
+    _jacobianOplus[2].block<1, 3>(1, 0) =
+      dev_rot * ((pair2.rot_pose[1] - pair1.rot_pose[2]).transpose()) / denom;
+    // conf4
+    _jacobianOplus[3].block<1, 3>(0, 0) =
+      dev_lin * (pair2.lin_pose[2].transpose()) / denom;
+    _jacobianOplus[3].block<1, 3>(1, 0) =
+      dev_rot * (pair2.rot_pose[2].transpose()) / denom;
+    // deltaT1
+    _jacobianOplus[4](0, 0) = dev_lin *
+      (-pair1.lin_dt[0] / denom - jerk_lin / (4.0 * denom));
+    _jacobianOplus[4](1, 0) = dev_rot *
+      (-pair1.rot_dt[0] / denom - jerk_rot / (4.0 * denom));
+    // deltaT2
+    _jacobianOplus[5](0, 0) = dev_lin *
+      ((pair2.lin_dt[0] - pair1.lin_dt[1]) / denom - jerk_lin / (2.0 * denom));
+    _jacobianOplus[5](1, 0) = dev_rot *
+      ((pair2.rot_dt[0] - pair1.rot_dt[1]) / denom - jerk_rot / (2.0 * denom));
+    // deltaT3
+    _jacobianOplus[6](0, 0) = dev_lin *
+      (pair2.lin_dt[1] / denom - jerk_lin / (4.0 * denom));
+    _jacobianOplus[6](1, 0) = dev_rot *
+      (pair2.rot_dt[1] / denom - jerk_rot / (4.0 * denom));
+  }
+#endif  // USE_ANALYTIC_JACOBI
 
 
   EIGEN_MAKE_ALIGNED_OPERATOR_NEW
@@ -255,6 +364,98 @@ public:
 
     _error[1] = penaltyBoundToInterval(jerk_rot, jerk_max_theta, penalty_eps);
   }
+
+  /**
+   * @brief Jacobi matrix of the cost function specified in computeError().
+   */
+#if USE_ANALYTIC_JACOBI
+  void linearizeOplus() override
+  {
+    // read params
+    const double jerk_max_x = params_->FollowPath.robot.jerk_max_x;
+    const double jerk_max_theta = params_->FollowPath.robot.jerk_max_theta;
+    const double penalty_eps = params_->FollowPath.optimizer.penalty_epsilon;
+    const bool exact_arc_length = params_->FollowPath.optimizer.exact_arc_length;
+
+    const auto* pose1 = dynamic_cast<const VertexPose*>(_vertices[0]);
+    const auto* pose2 = dynamic_cast<const VertexPose*>(_vertices[1]);
+    const auto* pose3 = dynamic_cast<const VertexPose*>(_vertices[2]);
+    const auto* dt1 = dynamic_cast<const VertexTimeDiff*>(_vertices[3]);
+    const auto* dt2 = dynamic_cast<const VertexTimeDiff*>(_vertices[4]);
+
+    const SegmentMotion seg1 = makeSegmentMotion(
+      pose2->position() - pose1->position(), pose1->theta(), pose2->theta(),
+      dt1->dt(), exact_arc_length);
+    const SegmentMotion seg2 = makeSegmentMotion(
+      pose3->position() - pose2->position(), pose2->theta(), pose3->theta(),
+      dt2->dt(), exact_arc_length);
+    const SigmoidTerm sig1 = makeSigmoidTerm(seg1.delta, seg1.cos_i, seg1.sin_i);
+    const SigmoidTerm sig2 = makeSigmoidTerm(seg2.delta, seg2.cos_i, seg2.sin_i);
+
+    const double vel0 = _measurement->linear.x;
+    const double vel1 = seg1.velRaw() * sig1.sigma;
+    const double vel2 = seg2.velRaw() * sig2.sigma;
+    const double omega0 = _measurement->angular.z;
+    const double omega1 = seg1.omega();
+    const double omega2 = seg2.omega();
+
+    // initial acceleration (from the measured initial velocity)
+    const double dt1v = dt1->dt();
+    const double acc0_lin = (vel1 - vel0) / dt1v;
+    const double acc0_rot = (omega1 - omega0) / dt1v;
+    const double dvel1_dtheta1 =
+      seg1.velRaw() * sig1.deriv * sig1.rot1 - sig1.sigma * seg1.d0 * seg1.dh_da / dt1v;
+    const double dvel1_dtheta2 = sig1.sigma * seg1.d0 * seg1.dh_da / dt1v;
+
+    // acceleration over the two segments
+    const AccelPairGrads pair = makeAccelPairGrads(
+      seg1, sig1, vel1, omega1, seg2, sig2, vel2, omega2);
+
+    const double dt2v = dt2->dt();
+    const double denom = dt1v / 2.0 + (dt1v + dt2v) / 4.0;
+    const double jerk_lin = (pair.a_lin - acc0_lin) / denom;
+    const double jerk_rot = (pair.a_rot - acc0_rot) / denom;
+
+    const double dev_lin = penaltyBoundToIntervalDerivative(
+      jerk_lin, jerk_max_x, penalty_eps);
+    const double dev_rot = penaltyBoundToIntervalDerivative(
+      jerk_rot, jerk_max_theta, penalty_eps);
+
+    const double inv_dt1_2 = 1.0 / (dt1v * dt1v);
+
+    _jacobianOplus[0].setZero();
+    _jacobianOplus[1].setZero();
+    _jacobianOplus[2].setZero();
+    _jacobianOplus[3].setZero();
+    _jacobianOplus[4].setZero();
+
+    // conf1
+    _jacobianOplus[0](0, 0) = dev_lin * (-sig1.sigma * seg1.arc * seg1.unit().x() * inv_dt1_2 / denom);
+    _jacobianOplus[0](0, 1) = dev_lin * (-sig1.sigma * seg1.arc * seg1.unit().y() * inv_dt1_2 / denom);
+    _jacobianOplus[0](0, 2) = dev_lin * (pair.lin_pose[0].z() - (-dvel1_dtheta1 / dt1v)) / denom;
+    _jacobianOplus[0](1, 2) = dev_rot * (pair.rot_pose[0].z() - inv_dt1_2) / denom;
+    // conf2
+    _jacobianOplus[1].block<1, 2>(0, 0) = dev_lin *
+      ((pair.lin_pose[1].head<2>() + sig1.sigma * seg1.arc * seg1.unit() * inv_dt1_2).transpose()) / denom;
+    _jacobianOplus[1](0, 2) = dev_lin * (pair.lin_pose[1].z() - (-dvel1_dtheta2 / dt1v)) / denom;
+    _jacobianOplus[1](1, 2) = dev_rot * (pair.rot_pose[1].z() + inv_dt1_2) / denom;
+    // conf3
+    _jacobianOplus[2].block<1, 3>(0, 0) = dev_lin * (pair.lin_pose[2].transpose()) / denom;
+    _jacobianOplus[2].block<1, 3>(1, 0) = dev_rot * (pair.rot_pose[2].transpose()) / denom;
+    // deltaT1
+    _jacobianOplus[3](0, 0) = dev_lin *
+      ((pair.lin_dt[0] - (-acc0_lin / dt1v - vel1 * inv_dt1_2)) / denom -
+       jerk_lin * (3.0 / 4.0) / denom);
+    _jacobianOplus[3](1, 0) = dev_rot *
+      ((pair.rot_dt[0] - (-acc0_rot / dt1v - omega1 * inv_dt1_2)) / denom -
+       jerk_rot * (3.0 / 4.0) / denom);
+    // deltaT2
+    _jacobianOplus[4](0, 0) = dev_lin *
+      (pair.lin_dt[1] / denom - jerk_lin * (1.0 / 4.0) / denom);
+    _jacobianOplus[4](1, 0) = dev_rot *
+      (pair.rot_dt[1] / denom - jerk_rot * (1.0 / 4.0) / denom);
+  }
+#endif  // USE_ANALYTIC_JACOBI
 
   /**
    * @brief Set the initial velocity that is taken into account for calculating the acceleration
@@ -376,6 +577,100 @@ public:
 
     _error[1] = penaltyBoundToInterval(jerk_rot, jerk_max_theta, penalty_eps);
   }
+
+  /**
+   * @brief Jacobi matrix of the cost function specified in computeError().
+   */
+#if USE_ANALYTIC_JACOBI
+  void linearizeOplus() override
+  {
+    // read params
+    const double jerk_max_x = params_->FollowPath.robot.jerk_max_x;
+    const double jerk_max_theta = params_->FollowPath.robot.jerk_max_theta;
+    const double penalty_eps = params_->FollowPath.optimizer.penalty_epsilon;
+    const bool exact_arc_length = params_->FollowPath.optimizer.exact_arc_length;
+
+    const auto* pose1 = dynamic_cast<const VertexPose*>(_vertices[0]);
+    const auto* pose2 = dynamic_cast<const VertexPose*>(_vertices[1]);
+    const auto* pose_goal = dynamic_cast<const VertexPose*>(_vertices[2]);
+    const auto* dt1 = dynamic_cast<const VertexTimeDiff*>(_vertices[3]);
+    const auto* dt2 = dynamic_cast<const VertexTimeDiff*>(_vertices[4]);
+
+    const SegmentMotion seg1 = makeSegmentMotion(
+      pose2->position() - pose1->position(), pose1->theta(), pose2->theta(),
+      dt1->dt(), exact_arc_length);
+    const SegmentMotion seg2 = makeSegmentMotion(
+      pose_goal->position() - pose2->position(), pose2->theta(), pose_goal->theta(),
+      dt2->dt(), exact_arc_length);
+    const SigmoidTerm sig1 = makeSigmoidTerm(seg1.delta, seg1.cos_i, seg1.sin_i);
+    const SigmoidTerm sig2 = makeSigmoidTerm(seg2.delta, seg2.cos_i, seg2.sin_i);
+
+    const double vel1 = seg1.velRaw() * sig1.sigma;
+    const double vel2 = seg2.velRaw() * sig2.sigma;
+    const double vel3 = _measurement->linear.x;
+    const double omega1 = seg1.omega();
+    const double omega2 = seg2.omega();
+    const double omega3 = _measurement->angular.z;
+
+    // final acceleration (towards the measured goal velocity)
+    const double dt2v = dt2->dt();
+    const double acc2_lin = (vel3 - vel2) / dt2v;
+    const double acc2_rot = (omega3 - omega2) / dt2v;
+    const double dvel2_dtheta2 =
+      seg2.velRaw() * sig2.deriv * sig2.rot1 - sig2.sigma * seg2.d0 * seg2.dh_da / dt2v;
+    const double dvel2_dtheta3 = sig2.sigma * seg2.d0 * seg2.dh_da / dt2v;
+
+    // acceleration over the two segments
+    const AccelPairGrads pair = makeAccelPairGrads(
+      seg1, sig1, vel1, omega1, seg2, sig2, vel2, omega2);
+
+    const double dt1v = dt1->dt();
+    const double denom = (dt1v + dt2v) / 4.0 + dt2v / 2.0;
+    const double jerk_lin = (acc2_lin - pair.a_lin) / denom;
+    const double jerk_rot = (acc2_rot - pair.a_rot) / denom;
+
+    const double dev_lin = penaltyBoundToIntervalDerivative(
+      jerk_lin, jerk_max_x, penalty_eps);
+    const double dev_rot = penaltyBoundToIntervalDerivative(
+      jerk_rot, jerk_max_theta, penalty_eps);
+
+    const double inv_dt2_2 = 1.0 / (dt2v * dt2v);
+
+    _jacobianOplus[0].setZero();
+    _jacobianOplus[1].setZero();
+    _jacobianOplus[2].setZero();
+    _jacobianOplus[3].setZero();
+    _jacobianOplus[4].setZero();
+
+    // conf1
+    _jacobianOplus[0].block<1, 3>(0, 0) =
+      dev_lin * (-pair.lin_pose[0].transpose()) / denom;
+    _jacobianOplus[0].block<1, 3>(1, 0) =
+      dev_rot * (-pair.rot_pose[0].transpose()) / denom;
+    // conf2
+    _jacobianOplus[1].block<1, 2>(0, 0) = dev_lin *
+      ((sig2.sigma * seg2.arc * seg2.unit() * inv_dt2_2 - pair.lin_pose[1].head<2>()).transpose()) / denom;
+    _jacobianOplus[1](0, 2) = dev_lin * ((-dvel2_dtheta2 / dt2v - pair.lin_pose[1].z()) / denom);
+    _jacobianOplus[1](1, 2) = dev_rot * ((inv_dt2_2 - pair.rot_pose[1].z()) / denom);
+    // goal pose
+    _jacobianOplus[2].block<1, 2>(0, 0) = dev_lin *
+      ((-sig2.sigma * seg2.arc * seg2.unit() * inv_dt2_2 - pair.lin_pose[2].head<2>()).transpose()) / denom;
+    _jacobianOplus[2](0, 2) = dev_lin * ((-dvel2_dtheta3 / dt2v - pair.lin_pose[2].z()) / denom);
+    _jacobianOplus[2](1, 2) = dev_rot * ((-inv_dt2_2 - pair.rot_pose[2].z()) / denom);
+    // deltaT1
+    _jacobianOplus[3](0, 0) = dev_lin *
+      (-pair.lin_dt[0] / denom - jerk_lin * (1.0 / 4.0) / denom);
+    _jacobianOplus[3](1, 0) = dev_rot *
+      (-pair.rot_dt[0] / denom - jerk_rot * (1.0 / 4.0) / denom);
+    // deltaT2
+    _jacobianOplus[4](0, 0) = dev_lin *
+      ((-acc2_lin / dt2v - vel2 * inv_dt2_2 - pair.lin_dt[1]) / denom -
+       jerk_lin * (3.0 / 4.0) / denom);
+    _jacobianOplus[4](1, 0) = dev_rot *
+      ((-acc2_rot / dt2v - omega2 * inv_dt2_2 - pair.rot_dt[1]) / denom -
+       jerk_rot * (3.0 / 4.0) / denom);
+  }
+#endif  // USE_ANALYTIC_JACOBI
 
   /**
    * @brief Set the goal / final velocity that is taken into account for calculating the acceleration
