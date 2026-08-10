@@ -73,6 +73,13 @@ public:
   /// @return    {distance [m], unit gradient vector}
   [[nodiscard]] QueryResult query(double wx, double wy) const;
 
+  /// @brief True derivative of the interpolated distance w.r.t. the query
+  /// position (unnormalized gradient of the bilinear interpolation).
+  ///
+  /// Required by gradient-based edges (the unit gradient returned by query()
+  /// is only correct up to the scale of the local distance gradient).
+  [[nodiscard]] Eigen::Vector2d gradient(double wx, double wy) const;
+
   /// @brief Check whether the map has been initialized.
   [[nodiscard]] bool isInitialized() const { return nx_ > 0 && ny_ > 0; }
 

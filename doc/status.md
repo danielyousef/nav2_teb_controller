@@ -35,7 +35,7 @@ project-state details live.
   steering-angle rate saturation, computeCurvature
 
 ### Verification
-- 3 gtest suites (edge time-optimal, path-smoothness, shortest-path)
+- 23 gtest suites, one per edge class (numeric-Jacobian checks via `test_jacobian_utils.hpp`)
 - `make build` / `make format` / `make lint` / `make test` / `make docs` / `make docs-check`
 
 ## Planned / To Do (Stubs)

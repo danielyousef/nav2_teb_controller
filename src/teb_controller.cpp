@@ -1,4 +1,5 @@
 #include "nav2_teb_controller/teb_controller.hpp"
+#include "nav2_teb_controller/teb_profiler.hpp"
 
 #include <memory>
 
@@ -111,6 +112,17 @@ geometry_msgs::msg::TwistStamped TEBController::computeVelocityCommands(
   cmd_vel.header.stamp = clock_->now();
   cmd_vel.header.frame_id = costmap_ros_->getGlobalFrameID();
   auto goal_pose = global_plan_.poses.back();
+  // Report the completed profiling window at the top of the next tick so that every
+  // block (including "total") of all 100 ticks has been fully recorded (off-by-one fix:
+  // previously the report fired while the current tick's "total" block was still alive).
+  {
+    const std::string profile_report = PROFILE_REPORT();
+    if (!profile_report.empty()) {
+      RCLCPP_INFO(logger_, "[PROFILE]\n%s", profile_report.c_str());
+    }
+  }
+  PROFILE_TICK();
+  PROFILE_BLOCK("total");
 
   // 1. Refresh dynamic parameters
   if (param_listener_->is_old(params_))
@@ -124,33 +136,43 @@ geometry_msgs::msg::TwistStamped TEBController::computeVelocityCommands(
   double path_length_time_based = velocity.linear.x * 5.0;
   double path_length =
       std::clamp(1.0 * global_plan_lookahead, path_length_time_based, global_plan_lookahead);
-  pruneGlobalPlan(*tf_, pose, global_plan_, prune_dist);
   int goal_idx;
-  auto transformed_plan = transformAndTrimPlan(
-      *tf_, global_plan_, pose, *costmap_ros_->getCostmap(), costmap_ros_->getGlobalFrameID(),
-      clock_->now(), path_length, &goal_idx);
+  nav_msgs::msg::Path transformed_plan;
+  {
+    PROFILE_BLOCK("prune_trim");
+    pruneGlobalPlan(*tf_, pose, global_plan_, prune_dist);
+    transformed_plan = transformAndTrimPlan(
+        *tf_, global_plan_, pose, *costmap_ros_->getCostmap(), costmap_ros_->getGlobalFrameID(),
+        clock_->now(), path_length, &goal_idx);
 
-  if (transformed_plan.poses.empty()) {
-    RCLCPP_INFO(logger_, "TEBController: Empty plan.");
-    return cmd_vel;
+    if (transformed_plan.poses.empty()) {
+      RCLCPP_INFO(logger_, "TEBController: Empty plan.");
+      return cmd_vel;
+    }
+    // Overwrite start with actual robot pose so TEB can use plan as initial trajectory
+    if (transformed_plan.poses.size() == 1)  // plan only contains the goal
+      transformed_plan.poses.insert(transformed_plan.poses.begin(),
+                                    geometry_msgs::msg::PoseStamped());
+    transformed_plan.poses.front() = pose;
   }
-  // Overwrite start with actual robot pose so TEB can use plan as initial trajectory
-  if (transformed_plan.poses.size() == 1)  // plan only contains the goal
-    transformed_plan.poses.insert(transformed_plan.poses.begin(),
-                                  geometry_msgs::msg::PoseStamped());
-  transformed_plan.poses.front() = pose;
 
   // Update obstacles
   costmap_converter_msgs::msg::ObstacleArrayMsg::ConstSharedPtr obstacles_ptr;
-  if (costmap_converter_)
-    obstacles_ptr = costmap_converter_->getObstacles();
-  teb_planner_->updateObstacleContainer(obstacles_ptr);
+  {
+    PROFILE_BLOCK("obstacles");
+    if (costmap_converter_)
+      obstacles_ptr = costmap_converter_->getObstacles();
+    teb_planner_->updateObstacleContainer(obstacles_ptr);
+  }
   // Update ESDF
-  const rclcpp::Time now = clock_->now();
-  if ((now - last_esdf_update_) >= esdf_update_period_) {
-    std::unique_lock lock(*costmap_ros_->getCostmap()->getMutex());
-    esdf_.update(*costmap_ros_->getCostmap());
-    last_esdf_update_ = now;
+  {
+    PROFILE_BLOCK("esdf_update");
+    const rclcpp::Time now = clock_->now();
+    if ((now - last_esdf_update_) >= esdf_update_period_) {
+      std::unique_lock lock(*costmap_ros_->getCostmap()->getMutex());
+      esdf_.update(*costmap_ros_->getCostmap());
+      last_esdf_update_ = now;
+    }
   }
 
   // update via-points container
@@ -160,11 +182,15 @@ geometry_msgs::msg::TwistStamped TEBController::computeVelocityCommands(
   // configureBackupModes(transformed_plan, goal_idx);
 
   // 3. Plan, wart start or reinit
-  bool final_goal =
-      (goal_idx == ((int)global_plan_.poses.size() - 1)) || params_.FollowPath.optimizer.fix_goal;
-  teb_planner_->setFixedGoal(final_goal);
-  teb_planner_->setFeedback(last_ackermann_cmd_.drive);
-  bool success = planner_->plan(transformed_plan, velocity);
+  bool success;
+  {
+    PROFILE_BLOCK("planner_plan");
+    bool final_goal =
+        (goal_idx == ((int)global_plan_.poses.size() - 1)) || params_.FollowPath.optimizer.fix_goal;
+    teb_planner_->setFixedGoal(final_goal);
+    teb_planner_->setFeedback(last_ackermann_cmd_.drive);
+    success = planner_->plan(transformed_plan, velocity);
+  }
   if (!success || planner_->hasDiverged()) {
     planner_->clear();
     RCLCPP_INFO(logger_, "TEBController: Planner failed.");
@@ -175,43 +201,54 @@ geometry_msgs::msg::TwistStamped TEBController::computeVelocityCommands(
   const auto &teb = teb_planner_->getTEB();
 
   // 5. Check for collision
-  const double feasibility_check = params_.FollowPath.obstacles.feasibility_check;
-  int index = checkFeasibility(teb, esdf_, footprint_, feasibility_check);
+  int index;
+  {
+    PROFILE_BLOCK("feasibility");
+    const double feasibility_check = params_.FollowPath.obstacles.feasibility_check;
+    index = checkFeasibility(teb, esdf_, footprint_, feasibility_check);
+  }
   const bool stop_cmd = index >= 0;
 
   // 5. Visualize
-  const std::string frame_id = costmap_ros_->getGlobalFrameID();
-  visualizer_->publishLocalPlan(teb, frame_id);
-  visualizer_->publishLookaheadPlan(transformed_plan);
-  visualizer_->publishTEBPoses(teb, frame_id);
-  visualizer_->publishObstacles(obstacles_ptr, frame_id);
-  visualizer_->publishCurvatureRadii(teb, frame_id);
-  visualizer_->publishFootprint(teb.pose(std::max(index, 0)), footprint_, frame_id);
+  {
+    PROFILE_BLOCK("visualize");
+    const std::string frame_id = costmap_ros_->getGlobalFrameID();
+    visualizer_->publishLocalPlan(teb, frame_id);
+    visualizer_->publishLookaheadPlan(transformed_plan);
+    visualizer_->publishTEBPoses(teb, frame_id);
+    visualizer_->publishObstacles(obstacles_ptr, frame_id);
+    visualizer_->publishCurvatureRadii(teb, frame_id);
+    visualizer_->publishFootprint(teb.pose(std::max(index, 0)), footprint_, frame_id);
+  }
 
   // 6. Get velocity command
-  const bool activate = params_.FollowPath.path_tracker.activate;
-  if (activate && !stop_cmd) {
-    const double dt_ref = params_.FollowPath.trajectory.dt_ref;
-    const int lookahead = params_.FollowPath.trajectory.control_look_ahead_poses;
-    const double min_look_ahead_time = params_.FollowPath.trajectory.control_min_look_ahead_time;
-    cmd_vel.twist = getVelocityCommand(teb, dt_ref, lookahead, min_look_ahead_time, false);
+  {
+    PROFILE_BLOCK("velocity_output");
+    const bool activate = params_.FollowPath.path_tracker.activate;
+    if (activate && !stop_cmd) {
+      const double dt_ref = params_.FollowPath.trajectory.dt_ref;
+      const int lookahead = params_.FollowPath.trajectory.control_look_ahead_poses;
+      const double min_look_ahead_time = params_.FollowPath.trajectory.control_min_look_ahead_time;
+      cmd_vel.twist = getVelocityCommand(teb, dt_ref, lookahead, min_look_ahead_time, false);
 
-    // Saturate velocity
-    const double v_max_x = params_.FollowPath.robot.v_max_x;
-    const double v_max_y = params_.FollowPath.robot.v_max_y;
-    const double v_max_theta = params_.FollowPath.robot.v_max_theta;
-    const double v_max_x_backwards = params_.FollowPath.robot.v_max_x_backwards;
-    const double steering_rate_max = params_.FollowPath.robot.steering_rate_max;
-    const double wheelbase = params_.FollowPath.robot.wheelbase;
-    const bool use_proportional_saturation = params_.FollowPath.robot.use_proportional_saturation;
-    double current_angle = last_ackermann_cmd_.drive.steering_angle;
-    saturateVelocity(cmd_vel.twist, v_max_x, v_max_y, v_max_theta, v_max_x_backwards,
-                     use_proportional_saturation);
-    // Saturate steering angle
-    auto dt = (clock_->now() - last_cmd_vel_.header.stamp).nanoseconds() / 1e9;
-    saturateSteeringAngle(cmd_vel.twist, current_angle, steering_rate_max, wheelbase, dt);
+      // Saturate velocity
+      const double v_max_x = params_.FollowPath.robot.v_max_x;
+      const double v_max_y = params_.FollowPath.robot.v_max_y;
+      const double v_max_theta = params_.FollowPath.robot.v_max_theta;
+      const double v_max_x_backwards = params_.FollowPath.robot.v_max_x_backwards;
+      const double steering_rate_max = params_.FollowPath.robot.steering_rate_max;
+      const double wheelbase = params_.FollowPath.robot.wheelbase;
+      const bool use_proportional_saturation = params_.FollowPath.robot.use_proportional_saturation;
+      double current_angle = last_ackermann_cmd_.drive.steering_angle;
+      saturateVelocity(cmd_vel.twist, v_max_x, v_max_y, v_max_theta, v_max_x_backwards,
+                       use_proportional_saturation);
+      // Saturate steering angle
+      auto dt = (clock_->now() - last_cmd_vel_.header.stamp).nanoseconds() / 1e9;
+      saturateSteeringAngle(cmd_vel.twist, current_angle, steering_rate_max, wheelbase, dt);
+    }
+    last_cmd_vel_ = cmd_vel;
   }
-  last_cmd_vel_ = cmd_vel;
+
   return cmd_vel;
 }
 

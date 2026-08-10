@@ -16,6 +16,11 @@ endif()
 
 # ── Options ───────────────────────────────────────────────────────────────────
 option(TEB_CONTROLLER_OPTIMIZER_BACKEND "Optimizer backend: g2o or ceres" "g2o")
+option(USE_ANALYTIC_JACOBI
+  "Analytic (closed-form) g2o edge Jacobians; OFF = g2o numeric differentiation (slow)" ON)
+
+# Passed to the library AND the test targets (the edge classes are header-only templates)
+add_compile_definitions(USE_ANALYTIC_JACOBI=$<BOOL:${USE_ANALYTIC_JACOBI}>)
 
 # ── Dependencies ──────────────────────────────────────────────────────────────
 find_package(ament_cmake REQUIRED)

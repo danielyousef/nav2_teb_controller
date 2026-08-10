@@ -128,6 +128,42 @@ void ObstacleMap2D::phase2_rowScan() {
 // Query: bilinear interpolation + gradient
 // ─────────────────────────────────────────────────────────────────────────────
 
+Eigen::Vector2d ObstacleMap2D::gradient(double wx, double wy) const {
+  if (!isInitialized())
+    return Eigen::Vector2d::Zero();
+
+  // World → fractional grid coordinates (cell centers at integer coords)
+  double gx = (wx - origin_x_) / res_ - 0.5;
+  double gy = (wy - origin_y_) / res_ - 0.5;
+
+  // Out-of-bounds guard
+  if (gx < 0.0 || gy < 0.0 || gx >= static_cast<double>(nx_ - 1) ||
+      gy >= static_cast<double>(ny_ - 1)) {
+    // Clamp and return boundary value with zero gradient
+    // (optimizer can't push further anyway)
+    gx = std::clamp(gx, 0.0, static_cast<double>(nx_ - 2));
+    gy = std::clamp(gy, 0.0, static_cast<double>(ny_ - 2));
+  }
+
+  const int ix = static_cast<int>(gx);
+  const int iy = static_cast<int>(gy);
+  const double tx = gx - ix;  // [0, 1)
+  const double ty = gy - iy;  // [0, 1)
+
+  // Bilinear interpolation of 4 neighbors
+  const double d00 = edt_[idx(ix, iy)];
+  const double d10 = edt_[idx(ix + 1, iy)];
+  const double d01 = edt_[idx(ix, iy + 1)];
+  const double d11 = edt_[idx(ix + 1, iy + 1)];
+
+  // Analytical gradient of bilinear interpolation
+  // ∂d/∂wx = (1/res) * ∂d/∂gx
+  const double dddgx = (1 - ty) * (d10 - d00) + ty * (d11 - d01);
+  const double dddgy = (1 - tx) * (d01 - d00) + tx * (d11 - d10);
+
+  return Eigen::Vector2d(dddgx / res_, dddgy / res_);
+}
+
 ObstacleMap2D::QueryResult ObstacleMap2D::query(double wx, double wy) const {
   if (!isInitialized())
     return {kOutOfBoundsDist, Eigen::Vector2d::Zero()};
@@ -159,12 +195,7 @@ ObstacleMap2D::QueryResult ObstacleMap2D::query(double wx, double wy) const {
   const double d =
       (1 - tx) * (1 - ty) * d00 + tx * (1 - ty) * d10 + (1 - tx) * ty * d01 + tx * ty * d11;
 
-  // Analytical gradient of bilinear interpolation
-  // ∂d/∂wx = (1/res) * ∂d/∂gx
-  const double dddgx = (1 - ty) * (d10 - d00) + ty * (d11 - d01);
-  const double dddgy = (1 - tx) * (d01 - d00) + tx * (d11 - d10);
-
-  Eigen::Vector2d grad(dddgx / res_, dddgy / res_);
+  Eigen::Vector2d grad = gradient(wx, wy);
 
   // Normalize to unit vector — satisfies Eikonal |∇d| = 1
   // Guard against zero-gradient (exactly on obstacle boundary)

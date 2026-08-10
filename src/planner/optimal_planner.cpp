@@ -1,8 +1,26 @@
 #include "nav2_teb_controller/planner/optimal_planner.hpp"
+#include "nav2_teb_controller/teb_profiler.hpp"
 
 #include <algorithm>
 
 namespace nav2_teb_controller {
+
+namespace {
+
+#ifdef BENCHMARK_TESTING
+std::string phaseSuffix(OptimizationPhase phase) {
+  switch (phase) {
+    case OptimizationPhase::Obstacles:
+      return "obstacles";
+    case OptimizationPhase::Kinodynamics:
+      return "kinodynamics";
+    default:
+      return "full";
+  }
+}
+#endif
+
+}  // namespace
 
 DiscreteTEBPlanner::DiscreteTEBPlanner(const teb_controller::Params &params,
                                        const Footprint &footprint,
@@ -203,11 +221,16 @@ bool DiscreteTEBPlanner::runPhase(int no_inner_iterations, int no_outer_iteratio
   double max_angle_diff = params_.FollowPath.trajectory.max_angle_diff;
   double adapt_factor = params_.FollowPath.weights.weight_adapt_factor;
 
-  if (auto_resize)
+  if (auto_resize) {
+    PROFILE_BLOCK(std::string("auto_resize_") + phaseSuffix(phase));
     autoResize(teb_, dt_ref, dt_hyst, min_seg_length, max_seg_length, max_angle_diff, min_samples,
                max_samples, fast_mode);
+  }
 
-  success = buildGraph(phase);
+  {
+    PROFILE_BLOCK(std::string("build_") + phaseSuffix(phase));
+    success = buildGraph(phase);
+  }
   if (!success) {
     RCLCPP_INFO(rclcpp::get_logger("optimal_planner"),
                 "DiscreteTEBPlanner: Building graph failed.");
@@ -215,29 +238,35 @@ bool DiscreteTEBPlanner::runPhase(int no_inner_iterations, int no_outer_iteratio
     return false;
   }
 
-  for (int i = 0; i < no_outer_iterations; ++i) {
-    success = optimizeGraph(no_inner_iterations, false);
-    if (!success) {
-      RCLCPP_INFO(rclcpp::get_logger("optimal_planner"),
-                  "DiscreteTEBPlanner: Optimizing graph failed.");
-      clearGraph();
-      return false;
+  {
+    PROFILE_BLOCK(std::string("optimize_") + phaseSuffix(phase));
+    for (int i = 0; i < no_outer_iterations; ++i) {
+      success = optimizeGraph(no_inner_iterations, false);
+      if (!success) {
+        RCLCPP_INFO(rclcpp::get_logger("optimal_planner"),
+                    "DiscreteTEBPlanner: Optimizing graph failed.");
+        clearGraph();
+        return false;
+      }
+
+      double chi2_current = optimizer_->chi2();
+      optimized_ = (chi2_old_ - chi2_current < 0.001);
+      chi2_old_ = chi2_current;
+
+      if (i < no_outer_iterations - 1)
+        weight_multiplier_ *= adapt_factor;
     }
-
-    double chi2_current = optimizer_->chi2();
-    optimized_ = (chi2_old_ - chi2_current < 0.001);
-    chi2_old_ = chi2_current;
-
-    if (i < no_outer_iterations - 1)
-      weight_multiplier_ *= adapt_factor;
   }
 
-  if (compute_cost_afterwards)
-    computeCurrentCost();
+  {
+    PROFILE_BLOCK(std::string("writeback_") + phaseSuffix(phase));
+    if (compute_cost_afterwards)
+      computeCurrentCost();
 
-  success = !hasDiverged();
-  writeBackOptimizedValues();
-  clearGraph();
+    success = !hasDiverged();
+    writeBackOptimizedValues();
+    clearGraph();
+  }
 
   return success;
 }
