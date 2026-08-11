@@ -368,6 +368,17 @@ teb_controller:
         validation:
           bounds<>: [1, 1000]
 
+      early_exit_min_delta:
+        type: double
+        default_value: 0.001
+        description: >
+          Relative chi² improvement threshold for the per-phase convergence early-exit. A phase stops
+          iterating once the relative improvement between two outer iterations drops below this value
+          (|chi²_old - chi²_current| / chi²_old). 0 disables the early-exit (always run the full
+          iteration budget). Consumed by: DiscreteTEBPlanner::runPhase.
+        validation:
+          bounds<>: [0.0, 1.0]
+
       penalty_epsilon:
         type: double
         default_value: 0.1

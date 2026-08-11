@@ -95,6 +95,7 @@ controller_server:
         free_goal_vel: false
         verbose: false
         stepwise_optimization: true
+        early_exit_min_delta: 0.001
         divergence_detection_enable: true
         divergence_detection_max_chi_squared: 100000.0
         divergence_detection_max_chi_violation_rate: 0.5

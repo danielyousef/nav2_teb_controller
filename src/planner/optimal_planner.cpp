@@ -221,6 +221,7 @@ bool DiscreteTEBPlanner::runPhase(int no_inner_iterations, int no_outer_iteratio
   double max_seg_length = params_.FollowPath.trajectory.max_seg_length;
   double max_angle_diff = params_.FollowPath.trajectory.max_angle_diff;
   double adapt_factor = params_.FollowPath.weights.weight_adapt_factor;
+  const double early_exit_delta = params_.FollowPath.optimizer.early_exit_min_delta;
 
   if (auto_resize) {
     PROFILE_BLOCK(std::string("auto_resize_") + phaseSuffix(phase));
@@ -251,8 +252,12 @@ bool DiscreteTEBPlanner::runPhase(int no_inner_iterations, int no_outer_iteratio
       }
 
       double chi2_current = optimizer_->chi2();
-      optimized_ = (chi2_old_ - chi2_current < 0.001);
+      const double delta = chi2_old_ - chi2_current;
+      optimized_ = (std::abs(delta / std::max(chi2_old_, 1e-9)) < early_exit_delta);
       chi2_old_ = chi2_current;
+
+      if (optimized_)
+        break;
 
       if (i < no_outer_iterations - 1)
         weight_multiplier_ *= adapt_factor;
