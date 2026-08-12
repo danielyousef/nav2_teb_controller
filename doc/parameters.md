@@ -32,6 +32,7 @@ teb_controller:
         divergence_detection_max_chi_squared: 10.0
         divergence_detection_max_chi_violation_rate: 0.5
         divergence_detection_max_path_length_factor: 3.0
+        early_exit_min_delta: 0.001
         exact_arc_length: true
         fast_mode: true
         fix_goal: true
@@ -197,6 +198,7 @@ teb_controller:
 | `FollowPath.optimizer.exact_arc_length` | `bool` | `true` |  | Use exact arc-length velocities instead of the linearized difference-quotient approximation in the edges that support it. | EdgeSteeringRate*, EdgeKinematicsCarlike, EdgeG3Continuity. |
 | `FollowPath.optimizer.no_inner_iterations` | `int` | `100` | parameter must be within bounds [1, 1000] | Maximum number of inner iterations per optimization call; together with no_outer_iterations split equally across the 3 optimization phases. | DiscreteTEBPlanner::optimizeTEB. |
 | `FollowPath.optimizer.no_outer_iterations` | `int` | `100` | parameter must be within bounds [1, 1000] | Maximum number of outer iterations per optimization call; together with no_inner_iterations split equally across the 3 optimization phases. | DiscreteTEBPlanner::optimizeTEB. |
+| `FollowPath.optimizer.early_exit_min_delta` | `double` | `0.001` | parameter must be within bounds [0.0, 1.0] | Relative chi² improvement threshold for the per-phase convergence early-exit. A phase stops iterating once the relative improvement between two outer iterations drops below this value (\|chi²_old - chi²_current\| / chi²_old). 0 disables the early-exit (always run the full iteration budget). | DiscreteTEBPlanner::runPhase. |
 | `FollowPath.optimizer.penalty_epsilon` | `double` | `0.1` | parameter must be within bounds [0.0, 1.0] | Buffer [s] before a constraint boundary within which the linear penalty ramps up to the weight. | all penalty-based edges (penalties.h). |
 | `FollowPath.optimizer.fix_goal` | `bool` | `true` |  | Fix the goal pose vertex (position and orientation cannot be optimized). | buildGraph (goal vertex). |
 | `FollowPath.optimizer.free_goal_vel` | `bool` | `false` |  | If true, do not enforce v=0 and angular velocity=0 at the goal (velocity is free at the goal). | buildGraph (vel_goal_ flag) and the goal velocity edges. |
