@@ -22,13 +22,15 @@ build:
 	source /opt/ros/jazzy/setup.bash && \
 	cd $(WS) && colcon build \
 		--packages-select $(PKG) \
-		--cmake-args -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+		--cmake-args -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+		-DCMAKE_WARN_DEPRECATED=OFF
 
 build-clean:
 	source /opt/ros/jazzy/setup.bash && \
 	cd $(WS) && colcon build \
 		--packages-select $(PKG) \
 		--cmake-args -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+		-DCMAKE_WARN_DEPRECATED=OFF \
 		--cmake-clean-first
 
 test-with-log:

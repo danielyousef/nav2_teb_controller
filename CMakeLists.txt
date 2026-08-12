@@ -64,6 +64,12 @@ set(SOURCES
 # ── Plugin library ────────────────────────────────────────────────────────────
 add_library(nav2_teb_controller SHARED ${SOURCES})
 
+# Header shim: shadows the deprecated <tl_expected/expected.hpp> from
+# ros-jazzy-parameter-traits
+target_include_directories(nav2_teb_controller PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/include_shim
+)
+
 target_include_directories(nav2_teb_controller PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include>
