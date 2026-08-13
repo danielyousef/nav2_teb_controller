@@ -108,6 +108,10 @@ protected:
   std::unique_ptr<PlannerBase> planner_;
   PlannerInterface<TimedElasticBand> *teb_planner_;
   std::unique_ptr<TEBVisualizer> visualizer_;
+
+  // Visualization throttle (rate from params, default 30 Hz)
+  rclcpp::Time last_visualize_time_{0, 0, RCL_ROS_TIME};
+  rclcpp::Duration visualize_update_period_{0, 0};
 };
 
 }  // namespace nav2_teb_controller

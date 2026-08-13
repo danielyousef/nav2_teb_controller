@@ -63,7 +63,7 @@ void TEBController::configure(const rclcpp_lifecycle::LifecycleNode::WeakPtr &pa
   esdf_update_period_ = rclcpp::Duration::from_seconds(1.0 / esdf_hz);
   // Visualization
   const double visu_hz = params_.FollowPath.visualization.publish_rate;
-  visualize_update_period_ = rclcpp::Duration::from_seconds(visu_hz > 0.0 ? 1.0 / visu_hz : 0.0);
+  visualize_update_period_ = rclcpp::Duration::from_seconds(1.0 / visu_hz);
   // Planner
   if (params_.FollowPath.hcp.activate) {
     RCLCPP_ERROR(logger_,
