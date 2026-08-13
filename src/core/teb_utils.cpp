@@ -461,7 +461,7 @@ int checkFeasibility(const TimedElasticBand &teb, const ObstacleMap2D &esdf, con
       const double wx = px + ct * c.offset.x() - st * c.offset.y();
       const double wy = py + st * c.offset.x() + ct * c.offset.y();
 
-      const double dist = esdf.query(wx, wy).distance - c.radius;
+      const double dist = esdf.queryDistance(wx, wy) - c.radius;
 
       if (dist > 0.0) {
         continue;

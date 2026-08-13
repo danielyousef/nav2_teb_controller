@@ -78,7 +78,7 @@ public:
       const double wx = x + ct * c.offset.x() - st * c.offset.y();
       const double wy = y + st * c.offset.x() + ct * c.offset.y();
 
-      const double dist_to_obs = esdf.query(wx, wy).distance;
+      const double dist_to_obs = esdf.queryDistance(wx, wy);
       const double clearance = dist_to_obs - c.radius;
 
       if (clearance < result.min_clearance) {

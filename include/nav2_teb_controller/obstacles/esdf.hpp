@@ -73,6 +73,16 @@ public:
   /// @return    {distance [m], unit gradient vector}
   [[nodiscard]] QueryResult query(double wx, double wy) const;
 
+  /// @brief Distance-only query (no gradient computation / normalization).
+  ///
+  /// Cheaper than query() — use whenever only the clearance is needed
+  /// (e.g. feasibility checks, obstacle-edge culling).
+  ///
+  /// @param wx  World X coordinate [m]
+  /// @param wy  World Y coordinate [m]
+  /// @return    Interpolated distance to nearest obstacle surface [m]
+  [[nodiscard]] double queryDistance(double wx, double wy) const;
+
   /// @brief True derivative of the interpolated distance w.r.t. the query
   /// position (unnormalized gradient of the bilinear interpolation).
   ///
@@ -110,6 +120,17 @@ private:
   // ──────────────────────────────────────────────
   // Internal helpers
   // ──────────────────────────────────────────────
+
+  /// Interpolated distance and unnormalized gradient of the bilinear surface.
+  struct InterpResult {
+    double d;    ///< Interpolated distance [m]
+    double dgx;  ///< ∂d/∂wx [m/m]
+    double dgy;  ///< ∂d/∂wy [m/m]
+  };
+
+  /// Shared core of query()/gradient()/queryDistance(): world → fractional grid
+  /// coords, out-of-bounds clamping and bilinear interpolation, computed once.
+  [[nodiscard]] InterpResult interpolate(double wx, double wy) const;
 
   [[nodiscard]] size_t idx(unsigned x, unsigned y) const {
     return static_cast<size_t>(y) * nx_ + x;

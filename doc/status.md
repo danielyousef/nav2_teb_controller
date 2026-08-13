@@ -27,6 +27,8 @@ project-state details live.
 - Footprint: circle model (polygon → circles via `scripts/footprint_polygon_to_circles.py`),
   ESDF-based collision check, `checkFeasibility` hard stop
 - `EdgeESDFObstacle` soft constraint per footprint circle (+ inflation term, robust kernel)
+- Lean queries: `queryDistance()` (distance-only) and a shared `interpolate()` core — distance-only
+  call sites (feasibility, obstacle-edge culling, footprint check) skip gradient + normalization
 
 ### TEB Utilities
 - initFromPath, autoResize, updateAndPrune, extractVelocity, getVelocityCommand,
@@ -37,6 +39,9 @@ project-state details live.
 ### Verification
 - 23 gtest suites, one per edge class (numeric-Jacobian checks via `test_jacobian_utils.hpp`)
 - `make build` / `make format` / `make lint` / `make test` / `make docs` / `make docs-check`
+- Visualization throttled to ~30 Hz in the control loop (publishers are additionally subscriber-gated)
+- `include_shim/tl_expected/expected.hpp` shadows the deprecated parameter_traits header at build time
+  (removes the `#pragma message` deprecation noise; plain `-I` beats `-isystem` /opt/ros)
 
 ## Planned / To Do (Stubs)
 

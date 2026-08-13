@@ -935,7 +935,7 @@ void DiscreteTEBPlanner::addEdgesESDFObstacles() {
       break;  // tail: not enough track left to bend around obstacles
 
     // Skip far obstacles
-    if (esdf_->query(pos.x(), pos.y()).distance > cutoff)
+    if (esdf_->queryDistance(pos.x(), pos.y()) > cutoff)
       continue;
 
     auto *e = new EdgeESDFObstacle();
