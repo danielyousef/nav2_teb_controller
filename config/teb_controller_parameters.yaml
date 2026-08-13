@@ -746,3 +746,14 @@ teb_controller:
         default_value: false
         description: >
           Publish visualization markers.
+
+      publish_rate:
+        type: double
+        default_value: 30.0
+        description: >
+          Publish rate [Hz] of the visualization topics, throttled in the control loop
+          (7 publishers; per-topic subscriber gating applies in addition).
+          0 = publish on every control tick (no throttling). Consumed by:
+          TEBController::computeVelocityCommands (visualization throttle).
+        validation:
+          bounds<>: [0.0, 1000.0]

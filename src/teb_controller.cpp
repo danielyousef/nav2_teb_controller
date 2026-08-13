@@ -61,6 +61,9 @@ void TEBController::configure(const rclcpp_lifecycle::LifecycleNode::WeakPtr &pa
   // ESDF
   const double esdf_hz = params_.FollowPath.obstacles.costmap_converter_rate;
   esdf_update_period_ = rclcpp::Duration::from_seconds(1.0 / esdf_hz);
+  // Visualization
+  const double visu_hz = params_.FollowPath.visualization.publish_rate;
+  visualize_update_period_ = rclcpp::Duration::from_seconds(visu_hz > 0.0 ? 1.0 / visu_hz : 0.0);
   // Planner
   if (params_.FollowPath.hcp.activate) {
     RCLCPP_ERROR(logger_,
@@ -210,16 +213,20 @@ geometry_msgs::msg::TwistStamped TEBController::computeVelocityCommands(
   }
   const bool stop_cmd = index >= 0;
 
-  // 5. Visualize
+  // 5. Visualize (throttled to the configured publish rate)
   {
     PROFILE_BLOCK("visualize");
-    const std::string frame_id = costmap_ros_->getGlobalFrameID();
-    visualizer_->publishLocalPlan(teb, frame_id);
-    visualizer_->publishLookaheadPlan(transformed_plan);
-    visualizer_->publishTEBPoses(teb, frame_id);
-    visualizer_->publishObstacles(obstacles_ptr, frame_id);
-    visualizer_->publishCurvatureRadii(teb, frame_id);
-    visualizer_->publishFootprint(teb.pose(std::max(index, 0)), footprint_, frame_id);
+    const rclcpp::Time now = clock_->now();
+    if ((now - last_visualize_time_) >= visualize_update_period_) {
+      last_visualize_time_ = now;
+      const std::string frame_id = costmap_ros_->getGlobalFrameID();
+      visualizer_->publishLocalPlan(teb, frame_id);
+      visualizer_->publishLookaheadPlan(transformed_plan);
+      visualizer_->publishTEBPoses(teb, frame_id);
+      visualizer_->publishObstacles(obstacles_ptr, frame_id);
+      visualizer_->publishCurvatureRadii(teb, frame_id);
+      visualizer_->publishFootprint(teb.pose(std::max(index, 0)), footprint_, frame_id);
+    }
   }
 
   // 6. Get velocity command

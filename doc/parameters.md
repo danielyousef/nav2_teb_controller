@@ -92,6 +92,7 @@ teb_controller:
         reinit_dist: 1.055
       visualization:
         activate: false
+        publish_rate: 30.0
       weights:
         weight_a_max_theta: 1.0
         weight_a_max_x: 1.0
@@ -266,3 +267,4 @@ teb_controller:
 | Param | Type | Default | Constraints | Description | Consumed by |
 |---|---|---|---|---|---|
 | `FollowPath.visualization.activate` | `bool` | `false` |  | Publish visualization markers. | none |
+| `FollowPath.visualization.publish_rate` | `double` | `30.0` | parameter must be within bounds [0.0, 1000.0] | Publish rate [Hz] of the visualization topics, throttled in the control loop (7 publishers; per-topic subscriber gating applies in addition). 0 = publish on every control tick (no throttling). | TEBController::computeVelocityCommands (visualization throttle). |

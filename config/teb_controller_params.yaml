@@ -143,4 +143,5 @@ controller_server:
         divergence_detection_enable: false
       visualization:
         activate: false
+        publish_rate: 30.0
         
