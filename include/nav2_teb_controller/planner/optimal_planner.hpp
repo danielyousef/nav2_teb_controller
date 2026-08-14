@@ -3,6 +3,8 @@
 #include <Eigen/Core>
 #include <costmap_converter_msgs/msg/obstacle_array_msg.hpp>
 #include <memory>
+#include <typeindex>
+#include <unordered_map>
 #include <nav2_teb_controller/obstacles/esdf.hpp>
 
 #include "ackermann_msgs/msg/ackermann_drive.hpp"
@@ -48,8 +50,8 @@
 #include <g2o/core/block_solver.h>
 #include <g2o/core/optimization_algorithm_gauss_newton.h>
 #include <g2o/core/optimization_algorithm_levenberg.h>
-#include <g2o/core/sparse_optimizer.h>
 #include <g2o/core/robust_kernel_impl.h>
+#include <g2o/core/sparse_optimizer.h>
 
 #include "g2o/solvers/cholmod/linear_solver_cholmod.h"
 #include "g2o/solvers/csparse/linear_solver_csparse.h"
@@ -61,11 +63,7 @@
 
 namespace nav2_teb_controller {
 
-enum class OptimizationPhase {
-  Obstacles = 0,
-  Kinodynamics = 1,
-  Full = 2
-};
+enum class OptimizationPhase { Obstacles = 0, Kinodynamics = 1, Full = 2 };
 
 struct EdgeDescriptor {
   int num_poses;      // Anzahl Pose-Vertices
@@ -93,8 +91,8 @@ public:
     ackermann_feedback_ = feedback;
   }
 
-  void updateObstacleContainer(
-      costmap_converter_msgs::msg::ObstacleArrayMsg::ConstSharedPtr obstacle_array = nullptr) override;
+  void updateObstacleContainer(costmap_converter_msgs::msg::ObstacleArrayMsg::ConstSharedPtr
+                                   obstacle_array = nullptr) override;
 
   void setObstacleMap(const ObstacleMap2D *esdf) override { esdf_ = esdf; }
 
@@ -142,6 +140,21 @@ protected:
   void addEdgesGeneric(const EdgeDescriptor &desc, const std::array<double, InfoDim> &weights,
                        Args &&...args);
 
+  // Pooled edge objects, reused across ticks and optimization phases. g2o never
+  // deletes them (returned to the pool in clearGraph before optimizer_->clear()),
+  // so a single allocation per edge type instead of ~N `new`s per control tick.
+  // Each pooled edge keeps its own robust kernel (g2o's Edge dtor deletes the
+  // kernel; a pooled kernel shared across edges would be a use-after-free).
+  template <typename EdgeType>
+  EdgeType *acquireEdge() {
+    auto &bucket = edge_pool_[std::type_index(typeid(EdgeType))];
+    if (bucket.empty())
+      return new EdgeType();
+    EdgeType *e = static_cast<EdgeType *>(bucket.back().release());
+    bucket.pop_back();
+    return e;
+  }
+
   // remove later in extra class
   [[nodiscard]] geometry_msgs::msg::Twist extractVelocity() const;
   [[nodiscard]] geometry_msgs::msg::Twist getVelocityCommand() const;
@@ -172,6 +185,18 @@ protected:
 
   std::vector<VertexPose *> pose_vertices_;
   std::vector<VertexTimeDiff *> timediff_vertices_;
+
+  // Pooled vertex objects, reused across ticks and optimization phases. g2o never
+  // deletes them (detached in clearGraph before optimizer_->clear()), so a single
+  // allocation per band size instead of ~6N `new`s per control tick.
+  std::vector<std::unique_ptr<VertexPose>> pose_vertex_pool_;
+  std::vector<std::unique_ptr<VertexTimeDiff>> timediff_vertex_pool_;
+
+  // Pooled edge objects per edge type (see acquireEdge). Pooled edges keep their
+  // robust kernel; the kernel is created once with the edge and deleted only when
+  // the pool is destroyed.
+  std::unordered_map<std::type_index, std::vector<std::unique_ptr<g2o::HyperGraph::Edge>>>
+      edge_pool_;
 
   std::pair<bool, geometry_msgs::msg::Twist>
       vel_start_;  //!< Store the initial velocity at the start pose

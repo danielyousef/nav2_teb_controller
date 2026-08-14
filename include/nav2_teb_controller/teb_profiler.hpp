@@ -6,7 +6,7 @@
 // uncomment the define below, or build with -DBENCHMARK_TESTING.
 // When disabled, all PROFILE_* macros expand to nothing -> zero overhead.
 
-// #define BENCHMARK_TESTING
+#define BENCHMARK_TESTING
 
 #include <algorithm>
 #include <chrono>
@@ -31,6 +31,16 @@ public:
     ++acc.count;
     acc.total_ns += elapsed_ns;
     acc.max_ns = std::max(acc.max_ns, elapsed_ns);
+  }
+
+  // Records a scalar sample (e.g. band size, outer iterations) into the current
+  // window; reported alongside the timing blocks with per-window avg/max.
+  // Values are stored in milli-units to keep int64 precision.
+  void recordScalar(const std::string &name, double value) {
+    auto &acc = scalars_[name];
+    ++acc.count;
+    acc.total_ns += static_cast<int64_t>(value * 1000.0);
+    acc.max_ns = std::max(acc.max_ns, static_cast<int64_t>(value * 1000.0));
   }
 
   // Returns a formatted summary table once the window is full (and resets the window),
@@ -62,7 +72,15 @@ public:
                     acc.max_ns / 1e6);
       out += line;
     }
+    for (const auto &[name, acc] : scalars_) {
+      const double avg = static_cast<double>(acc.total_ns) / 1000.0 / acc.count;
+      const double max = static_cast<double>(acc.max_ns) / 1000.0;
+      std::snprintf(line, sizeof(line), "  %-24s %6llu %10.2f %9.2f\n", name.c_str(),
+                    static_cast<unsigned long long>(acc.count), avg, max);
+      out += line;
+    }
     blocks_.clear();
+    scalars_.clear();
     return out;
   }
 
@@ -73,6 +91,7 @@ private:
     int64_t max_ns = 0;
   };
   std::unordered_map<std::string, Accum> blocks_;
+  std::unordered_map<std::string, Accum> scalars_;
   uint32_t tick_ = 0;
   static constexpr uint32_t kReportEveryTicks = 100;
 };

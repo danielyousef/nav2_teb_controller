@@ -90,6 +90,18 @@ public:
   /// is only correct up to the scale of the local distance gradient).
   [[nodiscard]] Eigen::Vector2d gradient(double wx, double wy) const;
 
+  /// @brief Distance and unnormalized gradient in a single interpolation.
+  ///
+  /// Cheaper than calling query() and gradient() separately (each call
+  /// re-runs the bilinear interpolation). Used by the ESDF obstacle edge's
+  /// linearizeOplus.
+  struct FullQueryResult {
+    double distance;           ///< Interpolated distance [m]
+    Eigen::Vector2d gradient;  ///< Unnormalized gradient of the bilinear surface
+  };
+
+  [[nodiscard]] FullQueryResult queryFull(double wx, double wy) const;
+
   /// @brief Check whether the map has been initialized.
   [[nodiscard]] bool isInitialized() const { return nx_ > 0 && ny_ > 0; }
 

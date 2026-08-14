@@ -150,6 +150,12 @@ bool DiscreteTEBPlanner::plan(const nav_msgs::msg::Path &initial_plan,
   vel_goal_.first = !free_goal_vel;
   vel_goal_.second = geometry_msgs::msg::Twist();
 
+#ifdef BENCHMARK_TESTING
+  // Band size per tick — settles whether slow stretches are driven by an oversized
+  // band (initFromPath has no max_samples cap) or by the optimizer's iteration count.
+  tebProfiler().recordScalar("teb_size", static_cast<double>(teb_.sizePoses()));
+#endif
+
   return optimizeTEB(no_inner_iterations, no_outer_iterations, false);
 }
 
@@ -167,10 +173,10 @@ bool DiscreteTEBPlanner::optimizeTEB(int no_inner_iterations, int no_outer_itera
   optimized_ = false;
 
   if (params_.FollowPath.optimizer.stepwise_optimization) {
-    int inner_per_phase = std::max(1, no_inner_iterations / 3);
-    int outer_per_phase = std::max(1, no_outer_iterations / 3);
-    int inner_last = no_inner_iterations - 2 * inner_per_phase;
-    int outer_last = no_outer_iterations - 2 * outer_per_phase;
+    int inner_per_phase = std::max(1, no_inner_iterations / 4);
+    int outer_per_phase = std::max(1, no_outer_iterations / 4);
+    int inner_last = std::max(1, no_inner_iterations - 2 * inner_per_phase);
+    int outer_last = std::max(1, no_outer_iterations - 2 * outer_per_phase);
 
     // Phase 1: Obstacles + base kinematics (G3, diffdrive/carlike)
     if (!runPhase(inner_per_phase, outer_per_phase, false, OptimizationPhase::Obstacles)) {
@@ -242,7 +248,9 @@ bool DiscreteTEBPlanner::runPhase(int no_inner_iterations, int no_outer_iteratio
 
   {
     PROFILE_BLOCK(std::string("optimize_") + phaseSuffix(phase));
+    int outer_iters_done = 0;
     for (int i = 0; i < no_outer_iterations; ++i) {
+      ++outer_iters_done;
       success = optimizeGraph(no_inner_iterations, false);
       if (!success) {
         RCLCPP_INFO(rclcpp::get_logger("optimal_planner"),
@@ -262,6 +270,10 @@ bool DiscreteTEBPlanner::runPhase(int no_inner_iterations, int no_outer_iteratio
       if (i < no_outer_iterations - 1)
         weight_multiplier_ *= adapt_factor;
     }
+#ifdef BENCHMARK_TESTING
+    // Outer iterations actually executed per phase (early exit vs full budget)
+    tebProfiler().recordScalar(std::string("outer_iters_") + phaseSuffix(phase), outer_iters_done);
+#endif
   }
 
   {
@@ -283,8 +295,6 @@ bool DiscreteTEBPlanner::buildGraph(OptimizationPhase phase) {
 
   bool divergence_detection = params_.FollowPath.optimizer.divergence_detection_enable;
   std::string robot_model = params_.FollowPath.robot.robot_model;
-  RCLCPP_DEBUG(rclcpp::get_logger("optimal_planner"),
-               "DiscreteTEBPlanner: Build graph (phase %d).", static_cast<int>(phase));
   optimizer_->setComputeBatchStatistics(divergence_detection);
 
   AddTEBVertices();
@@ -326,9 +336,6 @@ bool DiscreteTEBPlanner::buildGraph(OptimizationPhase phase) {
     addEdgesGeneric<EdgeGoalAngularVelocityZero, 1>(
         {5, 4, 0, -1, 1}, {params_.FollowPath.weights.weight_goal_angular_vel_zero});
 
-    RCLCPP_DEBUG(rclcpp::get_logger("optimal_planner"),
-                 "DiscreteTEBPlanner: Added generic edges (phase %d).", static_cast<int>(phase));
-
     // Measurement edges (acceleration, steering rate, jerk)
     AddEdgesAcceleration();
     AddEdgesSteeringRate();
@@ -351,10 +358,6 @@ bool DiscreteTEBPlanner::buildGraph(OptimizationPhase phase) {
                                          {params_.FollowPath.weights.weight_shortest_path});
     addEdgesGeneric<EdgePathSmoothness, 1>({2, 0, 1, 0, 1},
                                            {params_.FollowPath.weights.weight_path_smoothness});
-
-    RCLCPP_DEBUG(rclcpp::get_logger("optimal_planner"),
-                 "DiscreteTEBPlanner: Added efficiency edges (phase %d).",
-                 static_cast<int>(phase));
   }
 
   optimizer_->initializeOptimization();
@@ -404,15 +407,34 @@ bool DiscreteTEBPlanner::optimizeGraph(int no_inner_iterations, bool clear_after
 void DiscreteTEBPlanner::clearGraph() {
   // clear optimizer states
   if (optimizer_) {
-    // we will delete all edges but keep the vertices.
-    // before doing so, we will delete the link from the vertices to the edges.
-    auto &vertices = optimizer_->vertices();
-    for (auto &v : vertices)
-      v.second->edges().clear();
+    // Detach the per-phase edges from the pooled vertices (no dangling edge refs
+    // on the objects that are reused in the next phase). Note: HyperGraph::clear()
+    // deletes every vertex/edge it still owns, so the vertices must be detached
+    // WITHOUT deletion below (the pools reuse them on the next phase/tick).
+    for (auto *v : pose_vertices_)
+      v->edges().clear();
+    for (auto *v : timediff_vertices_)
+      v->edges().clear();
+    pose_vertices_.clear();
+    timediff_vertices_.clear();
 
-    // necessary, because optimizer->clear deletes pointer-targets
-    // (therefore it deletes TEB states!)
+    // Return the per-phase edges to the pool. HyperGraph::clear() would `delete`
+    // every edge it still owns (each edge dtor deletes its robust kernel too), so
+    // move them out of the optimizer's edge map first — pooled edges and their
+    // kernels are reused on the next phase/tick.
+    for (auto *e : optimizer_->edges())
+      edge_pool_[std::type_index(typeid(*e))].push_back(std::unique_ptr<g2o::HyperGraph::Edge>(e));
+    optimizer_->edges().clear();
+
+    // Detach the pooled vertices without deleting them. HyperGraph::removeVertex()
+    // would `delete` the vertex (verified: dtor call inside removeVertex), so clear
+    // the vertex map directly instead.
     optimizer_->vertices().clear();
+
+    // Nothing left to delete in the optimizer (vertex/edge maps are empty); this
+    // resets the active sets and the index mapping. Each edge owns its robust
+    // kernel: g2o's Edge dtor deletes it (verified against libg2o 2020.5: dtor
+    // calls the virtual deleting dtor).
     optimizer_->clear();
   }
 }
@@ -573,23 +595,39 @@ void DiscreteTEBPlanner::AddTEBVertices() {
   pose_vertices_.clear();
   timediff_vertices_.clear();
 
+  // Grow the vertex pools on demand (band sizes are stable across ticks, so this
+  // typically happens once); pooled vertices are reused instead of `new`ed per
+  // phase — the dominant allocation churn of the graph build. Note: resize() on a
+  // unique_ptr vector would only create null pointers, so grow via push_back.
+  const std::size_t n = teb_.sizePoses();
+  if (n > 0) {
+    while (pose_vertex_pool_.size() < n)
+      pose_vertex_pool_.push_back(std::make_unique<VertexPose>());
+    while (timediff_vertex_pool_.size() < n - 1)
+      timediff_vertex_pool_.push_back(std::make_unique<VertexTimeDiff>());
+  }
+
   // obstacles_per_vertex_.resize(teb_.sizePoses());
 
   unsigned int id_counter = 0;
 
-  for (std::size_t i = 0; i < teb_.sizePoses(); ++i) {
+  for (std::size_t i = 0; i < n; ++i) {
     // Start (i==0) und Goal (i==last) fixieren
-    const bool fixed = (i == 0) || ((i == teb_.sizePoses() - 1) && final_goal_);
+    const bool fixed = (i == 0) || ((i == n - 1) && final_goal_);
 
-    // Pose-Vertex aus PoseSE2 erstellen
-    auto *pose_vtx = new VertexPose(teb_.pose(i), fixed);
+    // Pose-Vertex aus der Pool wiederverwenden
+    VertexPose *pose_vtx = pose_vertex_pool_[i].get();
+    pose_vtx->setEstimate(teb_.pose(i));
+    pose_vtx->setFixed(fixed);
     pose_vtx->setId(id_counter++);
     optimizer_->addVertex(pose_vtx);
     pose_vertices_.push_back(pose_vtx);
 
     // TimeDiff-Vertex erstellen (N-1 Stück)
-    if (i < teb_.sizeTimeDiffs()) {
-      auto *dt_vtx = new VertexTimeDiff(teb_.timeDiff(i), false);
+    if (i < n - 1) {
+      VertexTimeDiff *dt_vtx = timediff_vertex_pool_[i].get();
+      dt_vtx->setEstimate(teb_.timeDiff(i));
+      dt_vtx->setFixed(false);
       dt_vtx->setId(id_counter++);
       optimizer_->addVertex(dt_vtx);
       timediff_vertices_.push_back(dt_vtx);
@@ -625,7 +663,7 @@ void DiscreteTEBPlanner::AddEdgesAcceleration() {
 
     // check if an initial velocity should be taken into accound
     if (vel_start_.first) {
-      auto *acceleration_edge = new EdgeAccelerationStart;
+      auto *acceleration_edge = acquireEdge<EdgeAccelerationStart>();
       acceleration_edge->setVertex(0, pose_vertices_[0]);
       acceleration_edge->setVertex(1, pose_vertices_[1]);
       acceleration_edge->setVertex(2, timediff_vertices_[0]);
@@ -637,7 +675,7 @@ void DiscreteTEBPlanner::AddEdgesAcceleration() {
 
     // now add the usual acceleration edge for each tuple of three teb poses
     for (int i = 0; i < n - 2; ++i) {
-      auto *acceleration_edge = new EdgeAcceleration;
+      auto *acceleration_edge = acquireEdge<EdgeAcceleration>();
       acceleration_edge->setVertex(0, pose_vertices_[i]);
       acceleration_edge->setVertex(1, pose_vertices_[i + 1]);
       acceleration_edge->setVertex(2, pose_vertices_[i + 2]);
@@ -650,7 +688,7 @@ void DiscreteTEBPlanner::AddEdgesAcceleration() {
 
     // check if a goal velocity should be taken into accound
     if (vel_goal_.first) {
-      auto *acceleration_edge = new EdgeAccelerationGoal;
+      auto *acceleration_edge = acquireEdge<EdgeAccelerationGoal>();
       acceleration_edge->setVertex(0, pose_vertices_[n - 2]);
       acceleration_edge->setVertex(1, pose_vertices_[n - 1]);
       acceleration_edge->setVertex(2, timediff_vertices_[teb_.sizeTimeDiffs() - 1]);
@@ -672,7 +710,7 @@ void DiscreteTEBPlanner::AddEdgesAcceleration() {
     information(2, 2) = weight_theta;
     // check if an initial velocity should be taken into accound
     if (vel_start_.first) {
-      auto *acceleration_edge = new EdgeAccelerationHolonomicStart;
+      auto *acceleration_edge = acquireEdge<EdgeAccelerationHolonomicStart>();
       acceleration_edge->setVertex(0, pose_vertices_[0]);
       acceleration_edge->setVertex(1, pose_vertices_[1]);
       acceleration_edge->setVertex(2, timediff_vertices_[0]);
@@ -683,7 +721,7 @@ void DiscreteTEBPlanner::AddEdgesAcceleration() {
     }
     // now add the usual acceleration edge for each tuple of three teb poses
     for (int i = 0; i < n - 2; ++i) {
-      auto *acceleration_edge = new EdgeAccelerationHolonomic;
+      auto *acceleration_edge = acquireEdge<EdgeAccelerationHolonomic>();
       acceleration_edge->setVertex(0, pose_vertices_[i]);
       acceleration_edge->setVertex(1, pose_vertices_[i + 1]);
       acceleration_edge->setVertex(2, pose_vertices_[i + 2]);
@@ -695,7 +733,7 @@ void DiscreteTEBPlanner::AddEdgesAcceleration() {
     }
     // check if a goal velocity should be taken into accound
     if (vel_goal_.first) {
-      auto *acceleration_edge = new EdgeAccelerationHolonomicGoal;
+      auto *acceleration_edge = acquireEdge<EdgeAccelerationHolonomicGoal>();
       acceleration_edge->setVertex(0, pose_vertices_[n - 2]);
       acceleration_edge->setVertex(1, pose_vertices_[n - 1]);
       acceleration_edge->setVertex(2, timediff_vertices_[teb_.sizeTimeDiffs() - 1]);
@@ -727,7 +765,7 @@ void DiscreteTEBPlanner::AddEdgesJerk() {
 
   // check if an initial velocity should be taken into accound
   if (vel_start_.first) {
-    auto *jerk_edge = new EdgeJerkStart;
+    auto *jerk_edge = acquireEdge<EdgeJerkStart>();
     jerk_edge->setVertex(0, pose_vertices_[0]);
     jerk_edge->setVertex(1, pose_vertices_[1]);
     jerk_edge->setVertex(2, pose_vertices_[2]);
@@ -740,7 +778,7 @@ void DiscreteTEBPlanner::AddEdgesJerk() {
   }
   // now add the usual jerk edge for each tuple of three teb poses
   for (int i = 0; i < n - 3; ++i) {
-    auto *jerk_edge = new EdgeJerk;
+    auto *jerk_edge = acquireEdge<EdgeJerk>();
     jerk_edge->setVertex(0, pose_vertices_[i]);
     jerk_edge->setVertex(1, pose_vertices_[i + 1]);
     jerk_edge->setVertex(2, pose_vertices_[i + 2]);
@@ -754,7 +792,7 @@ void DiscreteTEBPlanner::AddEdgesJerk() {
   }
   // check if a goal velocity should be taken into accound
   if (vel_goal_.first) {
-    auto *jerk_edge = new EdgeJerkGoal;
+    auto *jerk_edge = acquireEdge<EdgeJerkGoal>();
     jerk_edge->setVertex(0, pose_vertices_[n - 3]);
     jerk_edge->setVertex(1, pose_vertices_[n - 2]);
     jerk_edge->setVertex(2, pose_vertices_[n - 1]);
@@ -781,7 +819,7 @@ void DiscreteTEBPlanner::AddEdgesSteeringRate() {
   // check if an initial velocity should be taken into accound (we apply the same for the steering
   // rate)
   if (vel_start_.first) {
-    auto *steering_rate_edge = new EdgeSteeringRateStart;
+    auto *steering_rate_edge = acquireEdge<EdgeSteeringRateStart>();
     steering_rate_edge->setVertex(0, pose_vertices_[0]);
     steering_rate_edge->setVertex(1, pose_vertices_[1]);
     steering_rate_edge->setVertex(2, timediff_vertices_[0]);
@@ -792,7 +830,7 @@ void DiscreteTEBPlanner::AddEdgesSteeringRate() {
   }
   for (int i = 0; i < n - 2; i++)  // ignore twiced start only
   {
-    auto *steering_rate_edge = new EdgeSteeringRate;
+    auto *steering_rate_edge = acquireEdge<EdgeSteeringRate>();
     steering_rate_edge->setVertex(0, pose_vertices_[i]);
     steering_rate_edge->setVertex(1, pose_vertices_[i + 1]);
     steering_rate_edge->setVertex(2, pose_vertices_[i + 2]);
@@ -805,7 +843,7 @@ void DiscreteTEBPlanner::AddEdgesSteeringRate() {
   // check if a goal velocity should be taken into accound (we apply the same for the steering
   // rate)
   if (vel_goal_.first) {
-    auto *steering_rate_edge = new EdgeSteeringRateGoal;
+    auto *steering_rate_edge = acquireEdge<EdgeSteeringRateGoal>();
     steering_rate_edge->setVertex(0, pose_vertices_[n - 2]);
     steering_rate_edge->setVertex(1, pose_vertices_[n - 1]);
     steering_rate_edge->setVertex(2, timediff_vertices_[teb_.sizeTimeDiffs() - 1]);
@@ -829,7 +867,7 @@ void DiscreteTEBPlanner::AddEdgesStartSteeringAngle() {
   // Create the information matrix (weight).
   // Since our error is 2D, the information matrix is 2x2.
   Eigen::Matrix<double, 2, 2> information = Eigen::Matrix<double, 2, 2>::Identity() * weight;
-  auto *start_edge = new EdgeStartSteeringAngle();
+  auto *start_edge = acquireEdge<EdgeStartSteeringAngle>();
   start_edge->setVertex(0, pose_vertices_[0]);
   start_edge->setVertex(1, pose_vertices_[1]);
   start_edge->setVertex(2, pose_vertices_[2]);
@@ -901,14 +939,19 @@ void DiscreteTEBPlanner::AddEdgesObstacles() {
 void DiscreteTEBPlanner::addEdgesESDFObstacles() {
   const double weight_obstacle = params_.FollowPath.weights.weight_obstacle;
   const double weight_inflation = params_.FollowPath.weights.weight_inflation;
-  const double min_dist = params_.FollowPath.obstacles.min_obstacle_dist;
-  const double cutoff_buffer = params_.FollowPath.obstacles.cutoff_dist;
-  const auto &raw_fp = costmap_ros_->getRobotFootprint();
-  const double circum_radius = costmap_ros_->getLayeredCostmap()->getCircumscribedRadius();
-  double cutoff = circum_radius + min_dist + cutoff_buffer;
 
   if (weight_obstacle == 0.0 && weight_inflation == 0.0)
     return;
+
+  const double min_dist = params_.FollowPath.obstacles.min_obstacle_dist;
+  const double cutoff_buffer = params_.FollowPath.obstacles.cutoff_dist;
+  // Circumscribed radius of the footprint's circle model (max over circles of
+  // |offset| + radius). Computed locally instead of via costmap_ros_ so the
+  // ESDF path is testable without a configured costmap.
+  double circum_radius = 0.0;
+  for (const auto &c : footprint_.circles())
+    circum_radius = std::max(circum_radius, c.offset.norm() + c.radius);
+  double cutoff = circum_radius + min_dist + cutoff_buffer;
 
   const int n_circles = static_cast<int>(footprint_.circles().size());
   const int dim = n_circles + 1;
@@ -935,19 +978,21 @@ void DiscreteTEBPlanner::addEdgesESDFObstacles() {
       break;  // tail: not enough track left to bend around obstacles
 
     // Skip far obstacles
-    if (esdf_->queryDistance(pos.x(), pos.y()) > cutoff)
+    const double dist = esdf_->queryDistance(pos.x(), pos.y());
+    if (dist > cutoff)
       continue;
 
-    auto *e = new EdgeESDFObstacle();
+    auto *e = acquireEdge<EdgeESDFObstacle>();
     e->resize(n_circles);  // ← setzt _dimension vor addEdge
     e->setVertex(0, pose_vertices_[i]);
     e->setObstacle(*esdf_);
     e->setFootprint(footprint_);
     e->setTebConfig(params_);
     e->setInformation(information);
-    auto *rk = new g2o::RobustKernelHuber();
-    rk->setDelta(1.0);
-    e->setRobustKernel(rk);
+    // Kernel is owned by the edge: g2o's OptimizableGraph::Edge::~Edge() DELETES
+    // its robust kernel (verified in libg2o 2020.5: dtor calls the virtual
+    // deleting dtor -> operator delete). Each pooled edge carries its own kernel
+    // (created in the constructor), so pooled edges never share kernels.
     optimizer_->addEdge(e);
   }
 }
@@ -989,13 +1034,13 @@ void DiscreteTEBPlanner::addEdgesGeneric(const EdgeDescriptor &desc,
       end_i = n - desc.num_poses - std::abs(desc.offset) + 1;
     }
   }
-  // Information-Matrix aufbauen
+  // Information-Matrix aufbauen (identical for every edge instance)
   Eigen::Matrix<double, InfoDim, InfoDim> info = Eigen::Matrix<double, InfoDim, InfoDim>::Zero();
   for (int d = 0; d < InfoDim; ++d)
     info(d, d) = weights[d];
 
   for (int i = start_i; i < end_i; ++i) {
-    auto *e = new EdgeType();
+    auto *e = acquireEdge<EdgeType>();
     // Pose-Vertices setzen
     for (int p = 0; p < desc.num_poses; ++p)
       e->setVertex(p, pose_vertices_[i + p]);

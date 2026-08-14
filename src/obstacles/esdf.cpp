@@ -172,6 +172,11 @@ Eigen::Vector2d ObstacleMap2D::gradient(double wx, double wy) const {
   return Eigen::Vector2d(r.dgx, r.dgy);
 }
 
+ObstacleMap2D::FullQueryResult ObstacleMap2D::queryFull(double wx, double wy) const {
+  const InterpResult r = interpolate(wx, wy);
+  return {r.d, Eigen::Vector2d(r.dgx, r.dgy)};
+}
+
 double ObstacleMap2D::queryDistance(double wx, double wy) const {
   return interpolate(wx, wy).d;
 }
