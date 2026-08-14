@@ -50,11 +50,11 @@ public:
     const double penalty_eps = params_->FollowPath.optimizer.penalty_epsilon;
 
     // TEB_ASSERT_MSG(cfg_, "You must call setTebConfig on EdgeStartSteeringAngle()");
-    const auto* p0 = dynamic_cast<const VertexPose*>(_vertices[0]);
-    const auto* p1 = dynamic_cast<const VertexPose*>(_vertices[1]);
-    const auto* p2 = dynamic_cast<const VertexPose*>(_vertices[2]);
-    const auto* dt0 = dynamic_cast<const VertexTimeDiff*>(_vertices[3]);
-    const auto* dt1 = dynamic_cast<const VertexTimeDiff*>(_vertices[4]);
+    const auto* p0 = static_cast<const VertexPose*>(_vertices[0]);
+    const auto* p1 = static_cast<const VertexPose*>(_vertices[1]);
+    const auto* p2 = static_cast<const VertexPose*>(_vertices[2]);
+    const auto* dt0 = static_cast<const VertexTimeDiff*>(_vertices[3]);
+    const auto* dt1 = static_cast<const VertexTimeDiff*>(_vertices[4]);
 
     // === Segment 1: p0 -> p1 ===
     double steering_angle_cmd1 = 0.0;
@@ -122,9 +122,9 @@ public:
     const double steering_rate_max = params_->FollowPath.robot.steering_rate_max;
     const double penalty_eps = params_->FollowPath.optimizer.penalty_epsilon;
 
-    const auto* p0 = dynamic_cast<const VertexPose*>(_vertices[0]);
-    const auto* p1 = dynamic_cast<const VertexPose*>(_vertices[1]);
-    const auto* dt0 = dynamic_cast<const VertexTimeDiff*>(_vertices[3]);
+    const auto* p0 = static_cast<const VertexPose*>(_vertices[0]);
+    const auto* p1 = static_cast<const VertexPose*>(_vertices[1]);
+    const auto* dt0 = static_cast<const VertexTimeDiff*>(_vertices[3]);
 
     for (int i = 0; i < 5; ++i)
       _jacobianOplus[i].setZero();

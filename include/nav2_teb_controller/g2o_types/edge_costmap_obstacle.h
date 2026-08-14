@@ -30,7 +30,7 @@ public:
 
   void computeError() override
   {
-    const auto* vp = dynamic_cast<const VertexPose*>(_vertices[0]);
+    const auto* vp = static_cast<const VertexPose*>(_vertices[0]);
     const double min_dist = params_->FollowPath.obstacles.min_obstacle_dist;
 	const double inflation_dist = params_->FollowPath.obstacles.inflation_dist;
     const double epsilon  = params_->FollowPath.optimizer.penalty_epsilon;

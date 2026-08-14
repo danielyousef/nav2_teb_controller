@@ -45,16 +45,16 @@ public:
 
     // TEB_ASSERT_MSG(cfg_, "You must call setTebConfig on EdgeGoalAngularVelocityZero()");
     // Get all 9 vertices
-    const auto* pose_n_minus_4 = dynamic_cast<const VertexPose*>(_vertices[0]);
-    const auto* pose_n_minus_3 = dynamic_cast<const VertexPose*>(_vertices[1]);
-    const auto* pose_n_minus_2 = dynamic_cast<const VertexPose*>(_vertices[2]);
-    const auto* pose_n_minus_1 = dynamic_cast<const VertexPose*>(_vertices[3]);
-    const auto* pose_n = dynamic_cast<const VertexPose*>(_vertices[4]);
+    const auto* pose_n_minus_4 = static_cast<const VertexPose*>(_vertices[0]);
+    const auto* pose_n_minus_3 = static_cast<const VertexPose*>(_vertices[1]);
+    const auto* pose_n_minus_2 = static_cast<const VertexPose*>(_vertices[2]);
+    const auto* pose_n_minus_1 = static_cast<const VertexPose*>(_vertices[3]);
+    const auto* pose_n = static_cast<const VertexPose*>(_vertices[4]);
     
-    const auto* dt_n_minus_4 = dynamic_cast<const VertexTimeDiff*>(_vertices[5]);
-    const auto* dt_n_minus_3 = dynamic_cast<const VertexTimeDiff*>(_vertices[6]);
-    const auto* dt_n_minus_2 = dynamic_cast<const VertexTimeDiff*>(_vertices[7]);
-    const auto* dt_n_minus_1 = dynamic_cast<const VertexTimeDiff*>(_vertices[8]);
+    const auto* dt_n_minus_4 = static_cast<const VertexTimeDiff*>(_vertices[5]);
+    const auto* dt_n_minus_3 = static_cast<const VertexTimeDiff*>(_vertices[6]);
+    const auto* dt_n_minus_2 = static_cast<const VertexTimeDiff*>(_vertices[7]);
+    const auto* dt_n_minus_1 = static_cast<const VertexTimeDiff*>(_vertices[8]);
 
     // === STEP 1: Calculate angular velocity 'omega' using linear regression (robust) ===
     std::vector<double> t(5);
@@ -123,16 +123,16 @@ public:
   {
     const double wheelbase = params_->FollowPath.robot.wheelbase;
 
-    const auto* pose_n_minus_4 = dynamic_cast<const VertexPose*>(_vertices[0]);
-    const auto* pose_n_minus_3 = dynamic_cast<const VertexPose*>(_vertices[1]);
-    const auto* pose_n_minus_2 = dynamic_cast<const VertexPose*>(_vertices[2]);
-    const auto* pose_n_minus_1 = dynamic_cast<const VertexPose*>(_vertices[3]);
-    const auto* pose_n = dynamic_cast<const VertexPose*>(_vertices[4]);
+    const auto* pose_n_minus_4 = static_cast<const VertexPose*>(_vertices[0]);
+    const auto* pose_n_minus_3 = static_cast<const VertexPose*>(_vertices[1]);
+    const auto* pose_n_minus_2 = static_cast<const VertexPose*>(_vertices[2]);
+    const auto* pose_n_minus_1 = static_cast<const VertexPose*>(_vertices[3]);
+    const auto* pose_n = static_cast<const VertexPose*>(_vertices[4]);
 
-    const auto* dt_n_minus_4 = dynamic_cast<const VertexTimeDiff*>(_vertices[5]);
-    const auto* dt_n_minus_3 = dynamic_cast<const VertexTimeDiff*>(_vertices[6]);
-    const auto* dt_n_minus_2 = dynamic_cast<const VertexTimeDiff*>(_vertices[7]);
-    const auto* dt_n_minus_1 = dynamic_cast<const VertexTimeDiff*>(_vertices[8]);
+    const auto* dt_n_minus_4 = static_cast<const VertexTimeDiff*>(_vertices[5]);
+    const auto* dt_n_minus_3 = static_cast<const VertexTimeDiff*>(_vertices[6]);
+    const auto* dt_n_minus_2 = static_cast<const VertexTimeDiff*>(_vertices[7]);
+    const auto* dt_n_minus_1 = static_cast<const VertexTimeDiff*>(_vertices[8]);
 
     for (int i = 0; i < 9; ++i)
       _jacobianOplus[i].setZero();

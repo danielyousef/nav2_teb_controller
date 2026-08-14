@@ -57,11 +57,11 @@ public:
     const double steering_rate_max = params_->FollowPath.robot.steering_rate_max;
     const double penalty_eps = params_->FollowPath.optimizer.penalty_epsilon;
 
-    const auto* pose_prev = dynamic_cast<const VertexPose*>(_vertices[0]);
-    const auto* pose_curr = dynamic_cast<const VertexPose*>(_vertices[1]);
-    const auto* pose_next = dynamic_cast<const VertexPose*>(_vertices[2]);
-    const auto* dt1 = dynamic_cast<const VertexTimeDiff*>(_vertices[3]);
-    const auto* dt2 = dynamic_cast<const VertexTimeDiff*>(_vertices[4]);
+    const auto* pose_prev = static_cast<const VertexPose*>(_vertices[0]);
+    const auto* pose_curr = static_cast<const VertexPose*>(_vertices[1]);
+    const auto* pose_next = static_cast<const VertexPose*>(_vertices[2]);
+    const auto* dt1 = static_cast<const VertexTimeDiff*>(_vertices[3]);
+    const auto* dt2 = static_cast<const VertexTimeDiff*>(_vertices[4]);
 
     // Approximate path length between poses
     const Eigen::Vector2d diff1 = pose_curr->position() - pose_prev->position();
@@ -123,11 +123,11 @@ public:
     const double steering_rate_max = params_->FollowPath.robot.steering_rate_max;
     const double penalty_eps = params_->FollowPath.optimizer.penalty_epsilon;
 
-    const auto* pose_prev = dynamic_cast<const VertexPose*>(_vertices[0]);
-    const auto* pose_curr = dynamic_cast<const VertexPose*>(_vertices[1]);
-    const auto* pose_next = dynamic_cast<const VertexPose*>(_vertices[2]);
-    const auto* dt1 = dynamic_cast<const VertexTimeDiff*>(_vertices[3]);
-    const auto* dt2 = dynamic_cast<const VertexTimeDiff*>(_vertices[4]);
+    const auto* pose_prev = static_cast<const VertexPose*>(_vertices[0]);
+    const auto* pose_curr = static_cast<const VertexPose*>(_vertices[1]);
+    const auto* pose_next = static_cast<const VertexPose*>(_vertices[2]);
+    const auto* dt1 = static_cast<const VertexTimeDiff*>(_vertices[3]);
+    const auto* dt2 = static_cast<const VertexTimeDiff*>(_vertices[4]);
 
     const Eigen::Vector2d diff1 = pose_curr->position() - pose_prev->position();
     const double dist1 = diff1.norm();

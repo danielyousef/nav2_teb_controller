@@ -48,11 +48,11 @@ public:
     const double penalty_eps = params_->FollowPath.optimizer.penalty_epsilon;
 
     // TEB_ASSERT_MSG(cfg_, "You must call setTebConfig on EdgeSteeringAngleGoal()");
-    const auto* pose_n_minus_4 = dynamic_cast<const VertexPose*>(_vertices[0]);
-    const auto* pose_n_minus_3 = dynamic_cast<const VertexPose*>(_vertices[1]);
-    const auto* pose_n_minus_2 = dynamic_cast<const VertexPose*>(_vertices[2]);
-    const auto* pose_n_minus_1 = dynamic_cast<const VertexPose*>(_vertices[3]);
-    const auto* pose_n = dynamic_cast<const VertexPose*>(_vertices[4]);
+    const auto* pose_n_minus_4 = static_cast<const VertexPose*>(_vertices[0]);
+    const auto* pose_n_minus_3 = static_cast<const VertexPose*>(_vertices[1]);
+    const auto* pose_n_minus_2 = static_cast<const VertexPose*>(_vertices[2]);
+    const auto* pose_n_minus_1 = static_cast<const VertexPose*>(_vertices[3]);
+    const auto* pose_n = static_cast<const VertexPose*>(_vertices[4]);
 
     // STEP 1: Perform a least-squares fit to find the best-fit circle for the last 5 points.
     // The equation of a circle is (x-xc)^2 + (y-yc)^2 = R^2.
@@ -125,11 +125,11 @@ public:
     const double wheelbase = params_->FollowPath.robot.wheelbase;
     const double penalty_eps = params_->FollowPath.optimizer.penalty_epsilon;
 
-    const auto* pose_n_minus_4 = dynamic_cast<const VertexPose*>(_vertices[0]);
-    const auto* pose_n_minus_3 = dynamic_cast<const VertexPose*>(_vertices[1]);
-    const auto* pose_n_minus_2 = dynamic_cast<const VertexPose*>(_vertices[2]);
-    const auto* pose_n_minus_1 = dynamic_cast<const VertexPose*>(_vertices[3]);
-    const auto* pose_n = dynamic_cast<const VertexPose*>(_vertices[4]);
+    const auto* pose_n_minus_4 = static_cast<const VertexPose*>(_vertices[0]);
+    const auto* pose_n_minus_3 = static_cast<const VertexPose*>(_vertices[1]);
+    const auto* pose_n_minus_2 = static_cast<const VertexPose*>(_vertices[2]);
+    const auto* pose_n_minus_1 = static_cast<const VertexPose*>(_vertices[3]);
+    const auto* pose_n = static_cast<const VertexPose*>(_vertices[4]);
 
     for (int i = 0; i < 5; ++i)
       _jacobianOplus[i].setZero();

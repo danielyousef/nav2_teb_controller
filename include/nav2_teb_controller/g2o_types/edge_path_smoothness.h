@@ -43,8 +43,8 @@ public:
    */
   void computeError() override {
     // TEB_ASSERT_MSG(cfg_, "You must call setTebConfig on EdgePathSmoothness()");
-    const auto *pose1 = dynamic_cast<const VertexPose *>(_vertices[0]);
-    const auto *pose2 = dynamic_cast<const VertexPose *>(_vertices[1]);
+    const auto *pose1 = static_cast<const VertexPose *>(_vertices[0]);
+    const auto *pose2 = static_cast<const VertexPose *>(_vertices[1]);
 
     // Calculate change value of angle
     // _error[0] = pow(pose2->theta() - pose1->theta(), 2);
@@ -58,8 +58,8 @@ public:
    */
 #if USE_ANALYTIC_JACOBI
   void linearizeOplus() override {
-    const auto *pose1 = dynamic_cast<const VertexPose*>(_vertices[0]);
-    const auto *pose2 = dynamic_cast<const VertexPose*>(_vertices[1]);
+    const auto *pose1 = static_cast<const VertexPose*>(_vertices[0]);
+    const auto *pose2 = static_cast<const VertexPose*>(_vertices[1]);
     const double angle_diff = angles::normalize_angle(pose1->theta() - pose2->theta());
 
     _jacobianOplusXi.setZero();

@@ -63,9 +63,9 @@ public:
     const double penalty_eps = params_->FollowPath.optimizer.penalty_epsilon;
 
     // TEB_ASSERT_MSG(cfg_ && _measurement, "You must call setTebConfig() and setGoalVelocity() on EdgeAccelerationGoal()");
-    const auto* pose_pre_goal = dynamic_cast<const VertexPose*>(_vertices[0]);
-    const auto* pose_goal = dynamic_cast<const VertexPose*>(_vertices[1]);
-    const auto* dt = dynamic_cast<const VertexTimeDiff*>(_vertices[2]);
+    const auto* pose_pre_goal = static_cast<const VertexPose*>(_vertices[0]);
+    const auto* pose_goal = static_cast<const VertexPose*>(_vertices[1]);
+    const auto* dt = static_cast<const VertexTimeDiff*>(_vertices[2]);
 
     // VELOCITY & ACCELERATION
 
@@ -113,9 +113,9 @@ public:
     const double a_max_theta = params_->FollowPath.robot.a_max_theta;
     const double penalty_eps = params_->FollowPath.optimizer.penalty_epsilon;
 
-    const auto* pose_pre_goal = dynamic_cast<const VertexPose*>(_vertices[0]);
-    const auto* pose_goal = dynamic_cast<const VertexPose*>(_vertices[1]);
-    const auto* dt = dynamic_cast<const VertexTimeDiff*>(_vertices[2]);
+    const auto* pose_pre_goal = static_cast<const VertexPose*>(_vertices[0]);
+    const auto* pose_goal = static_cast<const VertexPose*>(_vertices[1]);
+    const auto* dt = static_cast<const VertexTimeDiff*>(_vertices[2]);
 
     const Eigen::Vector2d diff = pose_goal->position() - pose_pre_goal->position();
     const double cos1 = std::cos(pose_pre_goal->theta());

@@ -57,16 +57,16 @@ public:
 
     // TEB_ASSERT_MSG(cfg_, "You must call setTebConfig on EdgeSnap()");
     // Cast all 9 vertices
-    const auto* pose1 = dynamic_cast<const VertexPose*>(_vertices[0]);
-    const auto* pose2 = dynamic_cast<const VertexPose*>(_vertices[1]);
-    const auto* pose3 = dynamic_cast<const VertexPose*>(_vertices[2]);
-    const auto* pose4 = dynamic_cast<const VertexPose*>(_vertices[3]);
-    const auto* pose5 = dynamic_cast<const VertexPose*>(_vertices[4]);
+    const auto* pose1 = static_cast<const VertexPose*>(_vertices[0]);
+    const auto* pose2 = static_cast<const VertexPose*>(_vertices[1]);
+    const auto* pose3 = static_cast<const VertexPose*>(_vertices[2]);
+    const auto* pose4 = static_cast<const VertexPose*>(_vertices[3]);
+    const auto* pose5 = static_cast<const VertexPose*>(_vertices[4]);
 
-    const auto* dt1 = dynamic_cast<const VertexTimeDiff*>(_vertices[5]);
-    const auto* dt2 = dynamic_cast<const VertexTimeDiff*>(_vertices[6]);
-    const auto* dt3 = dynamic_cast<const VertexTimeDiff*>(_vertices[7]);
-    const auto* dt4 = dynamic_cast<const VertexTimeDiff*>(_vertices[8]);
+    const auto* dt1 = static_cast<const VertexTimeDiff*>(_vertices[5]);
+    const auto* dt2 = static_cast<const VertexTimeDiff*>(_vertices[6]);
+    const auto* dt3 = static_cast<const VertexTimeDiff*>(_vertices[7]);
+    const auto* dt4 = static_cast<const VertexTimeDiff*>(_vertices[8]);
 
     // ==================== LINEAR PART ====================
 
@@ -145,16 +145,16 @@ public:
     const double snap_max_theta = params_->FollowPath.robot.snap_max_theta;
     const double penalty_eps = params_->FollowPath.optimizer.penalty_epsilon;
 
-    const auto* pose1 = dynamic_cast<const VertexPose*>(_vertices[0]);
-    const auto* pose2 = dynamic_cast<const VertexPose*>(_vertices[1]);
-    const auto* pose3 = dynamic_cast<const VertexPose*>(_vertices[2]);
-    const auto* pose4 = dynamic_cast<const VertexPose*>(_vertices[3]);
-    const auto* pose5 = dynamic_cast<const VertexPose*>(_vertices[4]);
+    const auto* pose1 = static_cast<const VertexPose*>(_vertices[0]);
+    const auto* pose2 = static_cast<const VertexPose*>(_vertices[1]);
+    const auto* pose3 = static_cast<const VertexPose*>(_vertices[2]);
+    const auto* pose4 = static_cast<const VertexPose*>(_vertices[3]);
+    const auto* pose5 = static_cast<const VertexPose*>(_vertices[4]);
 
-    const auto* dt1 = dynamic_cast<const VertexTimeDiff*>(_vertices[5]);
-    const auto* dt2 = dynamic_cast<const VertexTimeDiff*>(_vertices[6]);
-    const auto* dt3 = dynamic_cast<const VertexTimeDiff*>(_vertices[7]);
-    const auto* dt4 = dynamic_cast<const VertexTimeDiff*>(_vertices[8]);
+    const auto* dt1 = static_cast<const VertexTimeDiff*>(_vertices[5]);
+    const auto* dt2 = static_cast<const VertexTimeDiff*>(_vertices[6]);
+    const auto* dt3 = static_cast<const VertexTimeDiff*>(_vertices[7]);
+    const auto* dt4 = static_cast<const VertexTimeDiff*>(_vertices[8]);
 
     // --- linear chain ---
     const Eigen::Vector2d diff[4] = {

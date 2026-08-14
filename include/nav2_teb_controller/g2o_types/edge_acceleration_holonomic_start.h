@@ -63,9 +63,9 @@ public:
     const double penalty_eps = params_->FollowPath.optimizer.penalty_epsilon;
 
     // TEB_ASSERT_MSG(cfg_ && _measurement, "You must call setTebConfig() and setStartVelocity() on EdgeAccelerationStart()");
-    const auto* pose1 = dynamic_cast<const VertexPose*>(_vertices[0]);
-    const auto* pose2 = dynamic_cast<const VertexPose*>(_vertices[1]);
-    const auto* dt = dynamic_cast<const VertexTimeDiff*>(_vertices[2]);
+    const auto* pose1 = static_cast<const VertexPose*>(_vertices[0]);
+    const auto* pose2 = static_cast<const VertexPose*>(_vertices[1]);
+    const auto* dt = static_cast<const VertexTimeDiff*>(_vertices[2]);
 
     // VELOCITY & ACCELERATION
     Eigen::Vector2d diff = pose2->position() - pose1->position();
@@ -112,9 +112,9 @@ public:
     const double a_max_theta = params_->FollowPath.robot.a_max_theta;
     const double penalty_eps = params_->FollowPath.optimizer.penalty_epsilon;
 
-    const auto* pose1 = dynamic_cast<const VertexPose*>(_vertices[0]);
-    const auto* pose2 = dynamic_cast<const VertexPose*>(_vertices[1]);
-    const auto* dt = dynamic_cast<const VertexTimeDiff*>(_vertices[2]);
+    const auto* pose1 = static_cast<const VertexPose*>(_vertices[0]);
+    const auto* pose2 = static_cast<const VertexPose*>(_vertices[1]);
+    const auto* dt = static_cast<const VertexTimeDiff*>(_vertices[2]);
 
     const Eigen::Vector2d diff = pose2->position() - pose1->position();
     const double cos1 = std::cos(pose1->theta());

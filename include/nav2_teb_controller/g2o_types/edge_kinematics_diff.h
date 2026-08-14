@@ -49,8 +49,8 @@ public:
   void computeError() override
   {
     // TEB_ASSERT_MSG(cfg_, "You must call setTebConfig on EdgeKinematicsDiffDrive()");
-    const auto* conf1 = dynamic_cast<const VertexPose*>(_vertices[0]);
-    const auto* conf2 = dynamic_cast<const VertexPose*>(_vertices[1]);
+    const auto* conf1 = static_cast<const VertexPose*>(_vertices[0]);
+    const auto* conf2 = static_cast<const VertexPose*>(_vertices[1]);
     
     Eigen::Vector2d deltaS = conf2->position() - conf1->position();
 

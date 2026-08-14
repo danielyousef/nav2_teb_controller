@@ -44,9 +44,9 @@ public:
     const double penalty_eps = params_->FollowPath.optimizer.penalty_epsilon;
     const bool exact_arc_length = params_->FollowPath.optimizer.exact_arc_length;
 
-    const auto* conf1 = dynamic_cast<const VertexPose*>(_vertices[0]);
-    const auto* conf2 = dynamic_cast<const VertexPose*>(_vertices[1]);
-    const auto* dt = dynamic_cast<const VertexTimeDiff*>(_vertices[2]);
+    const auto* conf1 = static_cast<const VertexPose*>(_vertices[0]);
+    const auto* conf2 = static_cast<const VertexPose*>(_vertices[1]);
+    const auto* dt = static_cast<const VertexTimeDiff*>(_vertices[2]);
 
     Eigen::Vector2d delta_s = conf2->estimate().position() - conf1->estimate().position();
     double dist = delta_s.norm();
@@ -79,9 +79,9 @@ public:
     const double penalty_eps = params_->FollowPath.optimizer.penalty_epsilon;
     const bool exact_arc_length = params_->FollowPath.optimizer.exact_arc_length;
 
-    const auto* conf1 = dynamic_cast<const VertexPose*>(_vertices[0]);
-    const auto* conf2 = dynamic_cast<const VertexPose*>(_vertices[1]);
-    const auto* dt = dynamic_cast<const VertexTimeDiff*>(_vertices[2]);
+    const auto* conf1 = static_cast<const VertexPose*>(_vertices[0]);
+    const auto* conf2 = static_cast<const VertexPose*>(_vertices[1]);
+    const auto* dt = static_cast<const VertexTimeDiff*>(_vertices[2]);
 
     const Eigen::Vector2d delta_s = conf2->position() - conf1->position();
     const double dist = delta_s.norm();

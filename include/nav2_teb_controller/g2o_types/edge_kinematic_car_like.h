@@ -60,8 +60,8 @@ public:
     const bool exact_arc_length = params_->FollowPath.optimizer.exact_arc_length;
     
     // TEB_ASSERT_MSG(cfg_, "You must call setTebConfig on EdgeKinematicsCarlike()");
-    const auto* conf1 = dynamic_cast<const VertexPose*>(_vertices[0]);
-    const auto* conf2 = dynamic_cast<const VertexPose*>(_vertices[1]);
+    const auto* conf1 = static_cast<const VertexPose*>(_vertices[0]);
+    const auto* conf2 = static_cast<const VertexPose*>(_vertices[1]);
     
     Eigen::Vector2d deltaS = conf2->position() - conf1->position();
 
@@ -94,8 +94,8 @@ public:
     const double turning_radius = params_->FollowPath.robot.min_turning_radius;
     const bool exact_arc_length = params_->FollowPath.optimizer.exact_arc_length;
 
-    const auto* conf1 = dynamic_cast<const VertexPose*>(_vertices[0]);
-    const auto* conf2 = dynamic_cast<const VertexPose*>(_vertices[1]);
+    const auto* conf1 = static_cast<const VertexPose*>(_vertices[0]);
+    const auto* conf2 = static_cast<const VertexPose*>(_vertices[1]);
 
     const Eigen::Vector2d deltaS = conf2->position() - conf1->position();
     const double dist = deltaS.norm();

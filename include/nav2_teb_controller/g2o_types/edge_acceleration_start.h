@@ -64,9 +64,9 @@ public:
     const bool exact_arc_length = params_->FollowPath.optimizer.exact_arc_length;
 
     // TEB_ASSERT_MSG(cfg_ && _measurement, "You must call setTebConfig() and setStartVelocity() on EdgeAccelerationStart()");
-    const auto* pose1 = dynamic_cast<const VertexPose*>(_vertices[0]);
-    const auto* pose2 = dynamic_cast<const VertexPose*>(_vertices[1]);
-    const auto* dt = dynamic_cast<const VertexTimeDiff*>(_vertices[2]);
+    const auto* pose1 = static_cast<const VertexPose*>(_vertices[0]);
+    const auto* pose2 = static_cast<const VertexPose*>(_vertices[1]);
+    const auto* dt = static_cast<const VertexTimeDiff*>(_vertices[2]);
 
     // VELOCITY & ACCELERATION
     const Eigen::Vector2d diff = pose2->position() - pose1->position();
@@ -112,9 +112,9 @@ public:
     const double penalty_eps = params_->FollowPath.optimizer.penalty_epsilon;
     const bool exact_arc_length = params_->FollowPath.optimizer.exact_arc_length;
 
-    const auto* pose1 = dynamic_cast<const VertexPose*>(_vertices[0]);
-    const auto* pose2 = dynamic_cast<const VertexPose*>(_vertices[1]);
-    const auto* dt = dynamic_cast<const VertexTimeDiff*>(_vertices[2]);
+    const auto* pose1 = static_cast<const VertexPose*>(_vertices[0]);
+    const auto* pose2 = static_cast<const VertexPose*>(_vertices[1]);
+    const auto* dt = static_cast<const VertexTimeDiff*>(_vertices[2]);
 
     const SegmentMotion seg = makeSegmentMotion(
       pose2->position() - pose1->position(), pose1->theta(), pose2->theta(),

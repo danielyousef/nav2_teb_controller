@@ -70,13 +70,13 @@ public:
     const bool exact_arc_length = params_->FollowPath.optimizer.exact_arc_length;
 
     // Get four poses and three deltaT
-    const auto* pose1 = dynamic_cast<const VertexPose*>(_vertices[0]);
-    const auto* pose2 = dynamic_cast<const VertexPose*>(_vertices[1]);
-    const auto* pose3 = dynamic_cast<const VertexPose*>(_vertices[2]);
-    const auto* pose4 = dynamic_cast<const VertexPose*>(_vertices[3]);
-    const auto* dt1 = dynamic_cast<const VertexTimeDiff*>(_vertices[4]);
-    const auto* dt2 = dynamic_cast<const VertexTimeDiff*>(_vertices[5]);
-    const auto* dt3 = dynamic_cast<const VertexTimeDiff*>(_vertices[6]);
+    const auto* pose1 = static_cast<const VertexPose*>(_vertices[0]);
+    const auto* pose2 = static_cast<const VertexPose*>(_vertices[1]);
+    const auto* pose3 = static_cast<const VertexPose*>(_vertices[2]);
+    const auto* pose4 = static_cast<const VertexPose*>(_vertices[3]);
+    const auto* dt1 = static_cast<const VertexTimeDiff*>(_vertices[4]);
+    const auto* dt2 = static_cast<const VertexTimeDiff*>(_vertices[5]);
+    const auto* dt3 = static_cast<const VertexTimeDiff*>(_vertices[6]);
 
     // Using the difference quotient to calculate difference quotient
     const Eigen::Vector2d diff1 = pose2->position() - pose1->position();
@@ -163,13 +163,13 @@ public:
     const double penalty_eps = params_->FollowPath.optimizer.penalty_epsilon;
     const bool exact_arc_length = params_->FollowPath.optimizer.exact_arc_length;
 
-    const auto* pose1 = dynamic_cast<const VertexPose*>(_vertices[0]);
-    const auto* pose2 = dynamic_cast<const VertexPose*>(_vertices[1]);
-    const auto* pose3 = dynamic_cast<const VertexPose*>(_vertices[2]);
-    const auto* pose4 = dynamic_cast<const VertexPose*>(_vertices[3]);
-    const auto* dt1 = dynamic_cast<const VertexTimeDiff*>(_vertices[4]);
-    const auto* dt2 = dynamic_cast<const VertexTimeDiff*>(_vertices[5]);
-    const auto* dt3 = dynamic_cast<const VertexTimeDiff*>(_vertices[6]);
+    const auto* pose1 = static_cast<const VertexPose*>(_vertices[0]);
+    const auto* pose2 = static_cast<const VertexPose*>(_vertices[1]);
+    const auto* pose3 = static_cast<const VertexPose*>(_vertices[2]);
+    const auto* pose4 = static_cast<const VertexPose*>(_vertices[3]);
+    const auto* dt1 = static_cast<const VertexTimeDiff*>(_vertices[4]);
+    const auto* dt2 = static_cast<const VertexTimeDiff*>(_vertices[5]);
+    const auto* dt3 = static_cast<const VertexTimeDiff*>(_vertices[6]);
 
     const SegmentMotion seg1 = makeSegmentMotion(
       pose2->position() - pose1->position(), pose1->theta(), pose2->theta(),
@@ -302,11 +302,11 @@ public:
     const bool exact_arc_length = params_->FollowPath.optimizer.exact_arc_length;
 
     // Obtain pose and time difference information from vertices
-    const auto* pose1 = dynamic_cast<const VertexPose*>(_vertices[0]);
-    const auto* pose2 = dynamic_cast<const VertexPose*>(_vertices[1]);
-    const auto* pose3 = dynamic_cast<const VertexPose*>(_vertices[2]);
-    const auto* dt1 = dynamic_cast<const VertexTimeDiff*>(_vertices[3]);
-    const auto* dt2 = dynamic_cast<const VertexTimeDiff*>(_vertices[4]);
+    const auto* pose1 = static_cast<const VertexPose*>(_vertices[0]);
+    const auto* pose2 = static_cast<const VertexPose*>(_vertices[1]);
+    const auto* pose3 = static_cast<const VertexPose*>(_vertices[2]);
+    const auto* dt1 = static_cast<const VertexTimeDiff*>(_vertices[3]);
+    const auto* dt2 = static_cast<const VertexTimeDiff*>(_vertices[4]);
 
     // Calculate the distance difference and angle difference between poses
     const Eigen::Vector2d diff1 = pose2->position() - pose1->position();
@@ -377,11 +377,11 @@ public:
     const double penalty_eps = params_->FollowPath.optimizer.penalty_epsilon;
     const bool exact_arc_length = params_->FollowPath.optimizer.exact_arc_length;
 
-    const auto* pose1 = dynamic_cast<const VertexPose*>(_vertices[0]);
-    const auto* pose2 = dynamic_cast<const VertexPose*>(_vertices[1]);
-    const auto* pose3 = dynamic_cast<const VertexPose*>(_vertices[2]);
-    const auto* dt1 = dynamic_cast<const VertexTimeDiff*>(_vertices[3]);
-    const auto* dt2 = dynamic_cast<const VertexTimeDiff*>(_vertices[4]);
+    const auto* pose1 = static_cast<const VertexPose*>(_vertices[0]);
+    const auto* pose2 = static_cast<const VertexPose*>(_vertices[1]);
+    const auto* pose3 = static_cast<const VertexPose*>(_vertices[2]);
+    const auto* dt1 = static_cast<const VertexTimeDiff*>(_vertices[3]);
+    const auto* dt2 = static_cast<const VertexTimeDiff*>(_vertices[4]);
 
     const SegmentMotion seg1 = makeSegmentMotion(
       pose2->position() - pose1->position(), pose1->theta(), pose2->theta(),
@@ -515,11 +515,11 @@ public:
     const bool exact_arc_length = params_->FollowPath.optimizer.exact_arc_length;
 
     // Obtain pose and time difference information from vertices
-    const auto* pose1 = dynamic_cast<const VertexPose*>(_vertices[0]);
-    const auto* pose2 = dynamic_cast<const VertexPose*>(_vertices[1]);
-    const auto* pose_goal = dynamic_cast<const VertexPose*>(_vertices[2]);
-    const auto* dt1 = dynamic_cast<const VertexTimeDiff*>(_vertices[3]);
-    const auto* dt2 = dynamic_cast<const VertexTimeDiff*>(_vertices[4]);
+    const auto* pose1 = static_cast<const VertexPose*>(_vertices[0]);
+    const auto* pose2 = static_cast<const VertexPose*>(_vertices[1]);
+    const auto* pose_goal = static_cast<const VertexPose*>(_vertices[2]);
+    const auto* dt1 = static_cast<const VertexTimeDiff*>(_vertices[3]);
+    const auto* dt2 = static_cast<const VertexTimeDiff*>(_vertices[4]);
 
     // Calculate the distance difference and angle difference between poses
     const Eigen::Vector2d diff1 = pose2->position() - pose1->position();
@@ -590,11 +590,11 @@ public:
     const double penalty_eps = params_->FollowPath.optimizer.penalty_epsilon;
     const bool exact_arc_length = params_->FollowPath.optimizer.exact_arc_length;
 
-    const auto* pose1 = dynamic_cast<const VertexPose*>(_vertices[0]);
-    const auto* pose2 = dynamic_cast<const VertexPose*>(_vertices[1]);
-    const auto* pose_goal = dynamic_cast<const VertexPose*>(_vertices[2]);
-    const auto* dt1 = dynamic_cast<const VertexTimeDiff*>(_vertices[3]);
-    const auto* dt2 = dynamic_cast<const VertexTimeDiff*>(_vertices[4]);
+    const auto* pose1 = static_cast<const VertexPose*>(_vertices[0]);
+    const auto* pose2 = static_cast<const VertexPose*>(_vertices[1]);
+    const auto* pose_goal = static_cast<const VertexPose*>(_vertices[2]);
+    const auto* dt1 = static_cast<const VertexTimeDiff*>(_vertices[3]);
+    const auto* dt2 = static_cast<const VertexTimeDiff*>(_vertices[4]);
 
     const SegmentMotion seg1 = makeSegmentMotion(
       pose2->position() - pose1->position(), pose1->theta(), pose2->theta(),

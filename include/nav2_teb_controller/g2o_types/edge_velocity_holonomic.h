@@ -59,9 +59,9 @@ public:
     const double penalty_eps = params_->FollowPath.optimizer.penalty_epsilon;
 
     // TEB_ASSERT_MSG(cfg_, "You must call setTebConfig on EdgeVelocityHolonomic()");
-    const auto* conf1 = dynamic_cast<const VertexPose*>(_vertices[0]);
-    const auto* conf2 = dynamic_cast<const VertexPose*>(_vertices[1]);
-    const auto* deltaT = dynamic_cast<const VertexTimeDiff*>(_vertices[2]);
+    const auto* conf1 = static_cast<const VertexPose*>(_vertices[0]);
+    const auto* conf2 = static_cast<const VertexPose*>(_vertices[1]);
+    const auto* deltaT = static_cast<const VertexTimeDiff*>(_vertices[2]);
     Eigen::Vector2d deltaS = conf2->position() - conf1->position();
     
     double cos_theta1 = std::cos(conf1->theta());
@@ -97,9 +97,9 @@ public:
     const double v_max_theta = params_->FollowPath.robot.v_max_theta;
     const double penalty_eps = params_->FollowPath.optimizer.penalty_epsilon;
 
-    const auto* conf1 = dynamic_cast<const VertexPose*>(_vertices[0]);
-    const auto* conf2 = dynamic_cast<const VertexPose*>(_vertices[1]);
-    const auto* deltaT = dynamic_cast<const VertexTimeDiff*>(_vertices[2]);
+    const auto* conf1 = static_cast<const VertexPose*>(_vertices[0]);
+    const auto* conf2 = static_cast<const VertexPose*>(_vertices[1]);
+    const auto* deltaT = static_cast<const VertexTimeDiff*>(_vertices[2]);
 
     const Eigen::Vector2d deltaS = conf2->position() - conf1->position();
     const double dt = deltaT->estimate();

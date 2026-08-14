@@ -50,11 +50,11 @@ public:
     const double penalty_eps = params_->FollowPath.optimizer.penalty_epsilon;
     const bool exact_arc_length = params_->FollowPath.optimizer.exact_arc_length;
 
-    const auto* conf1 = dynamic_cast<const VertexPose*>(_vertices[0]);
-    const auto* conf2 = dynamic_cast<const VertexPose*>(_vertices[1]);
-    const auto* conf3 = dynamic_cast<const VertexPose*>(_vertices[2]);
-    const auto* dt1 = dynamic_cast<const VertexTimeDiff*>(_vertices[3]);
-    const auto* dt2 = dynamic_cast<const VertexTimeDiff*>(_vertices[4]);
+    const auto* conf1 = static_cast<const VertexPose*>(_vertices[0]);
+    const auto* conf2 = static_cast<const VertexPose*>(_vertices[1]);
+    const auto* conf3 = static_cast<const VertexPose*>(_vertices[2]);
+    const auto* dt1 = static_cast<const VertexTimeDiff*>(_vertices[3]);
+    const auto* dt2 = static_cast<const VertexTimeDiff*>(_vertices[4]);
 
     Eigen::Vector2d delta_s1 = conf2->estimate().position() - conf1->estimate().position();
     Eigen::Vector2d delta_s2 = conf3->estimate().position() - conf2->estimate().position();
@@ -103,11 +103,11 @@ public:
     const double penalty_eps = params_->FollowPath.optimizer.penalty_epsilon;
     const bool exact_arc_length = params_->FollowPath.optimizer.exact_arc_length;
 
-    const auto* conf1 = dynamic_cast<const VertexPose*>(_vertices[0]);
-    const auto* conf2 = dynamic_cast<const VertexPose*>(_vertices[1]);
-    const auto* conf3 = dynamic_cast<const VertexPose*>(_vertices[2]);
-    const auto* dt1 = dynamic_cast<const VertexTimeDiff*>(_vertices[3]);
-    const auto* dt2 = dynamic_cast<const VertexTimeDiff*>(_vertices[4]);
+    const auto* conf1 = static_cast<const VertexPose*>(_vertices[0]);
+    const auto* conf2 = static_cast<const VertexPose*>(_vertices[1]);
+    const auto* conf3 = static_cast<const VertexPose*>(_vertices[2]);
+    const auto* dt1 = static_cast<const VertexTimeDiff*>(_vertices[3]);
+    const auto* dt2 = static_cast<const VertexTimeDiff*>(_vertices[4]);
 
     const Eigen::Vector2d delta_s1 = conf2->position() - conf1->position();
     const Eigen::Vector2d delta_s2 = conf3->position() - conf2->position();

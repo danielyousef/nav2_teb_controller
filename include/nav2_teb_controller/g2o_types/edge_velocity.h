@@ -59,9 +59,9 @@ public:
     const bool exact_arc_length = params_->FollowPath.optimizer.exact_arc_length;
 
     // TEB_ASSERT_MSG(params_.FollowPath."You must call setTebConfig on EdgeVelocity()");
-    const auto* conf1 = dynamic_cast<const VertexPose*>(_vertices[0]);
-    const auto* conf2 = dynamic_cast<const VertexPose*>(_vertices[1]);
-    const auto* deltaT = dynamic_cast<const VertexTimeDiff*>(_vertices[2]);
+    const auto* conf1 = static_cast<const VertexPose*>(_vertices[0]);
+    const auto* conf2 = static_cast<const VertexPose*>(_vertices[1]);
+    const auto* deltaT = static_cast<const VertexTimeDiff*>(_vertices[2]);
     
     const Eigen::Vector2d deltaS = conf2->estimate().position() - conf1->estimate().position();
     
@@ -101,9 +101,9 @@ public:
     const double penalty_eps = params_->FollowPath.optimizer.penalty_epsilon;
     const bool exact_arc_length = params_->FollowPath.optimizer.exact_arc_length;
 
-    const auto* conf1 = dynamic_cast<const VertexPose*>(_vertices[0]);
-    const auto* conf2 = dynamic_cast<const VertexPose*>(_vertices[1]);
-    const auto* deltaT = dynamic_cast<const VertexTimeDiff*>(_vertices[2]);
+    const auto* conf1 = static_cast<const VertexPose*>(_vertices[0]);
+    const auto* conf2 = static_cast<const VertexPose*>(_vertices[1]);
+    const auto* deltaT = static_cast<const VertexTimeDiff*>(_vertices[2]);
 
     const Eigen::Vector2d deltaS = conf2->position() - conf1->position();
     const double d0 = deltaS.norm();

@@ -47,7 +47,7 @@ public:
   void computeError() override
   {
     // TEB_ASSERT_MSG(cfg_, "You must call setTebConfig on EdgeTimeOptimal()");
-    const auto* timediff = dynamic_cast<const VertexTimeDiff*>(_vertices[0]);
+    const auto* timediff = static_cast<const VertexTimeDiff*>(_vertices[0]);
 
    _error[0] = timediff->dt();
   

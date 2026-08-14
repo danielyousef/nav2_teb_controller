@@ -34,8 +34,8 @@ public:
    */
   void computeError() override {
     // TEB_ASSERT_MSG(cfg_, "You must call setTebConfig on EdgeShortestPath()");
-    const auto *pose1 = dynamic_cast<const VertexPose*>(_vertices[0]);
-    const auto *pose2 = dynamic_cast<const VertexPose*>(_vertices[1]);
+    const auto *pose1 = static_cast<const VertexPose*>(_vertices[0]);
+    const auto *pose2 = static_cast<const VertexPose*>(_vertices[1]);
     _error[0] = (pose2->position() - pose1->position()).norm();
 
     // TEB_ASSERT_MSG(std::isfinite(_error[0]), "EdgeShortestPath::computeError() _error[0]=%f\n", _error[0]);
@@ -46,8 +46,8 @@ public:
    */
 #if USE_ANALYTIC_JACOBI
   void linearizeOplus() override {
-    const auto *pose1 = dynamic_cast<const VertexPose*>(_vertices[0]);
-    const auto *pose2 = dynamic_cast<const VertexPose*>(_vertices[1]);
+    const auto *pose1 = static_cast<const VertexPose*>(_vertices[0]);
+    const auto *pose2 = static_cast<const VertexPose*>(_vertices[1]);
     const Eigen::Vector2d delta = pose2->position() - pose1->position();
     const double dist = delta.norm();
 
