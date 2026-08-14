@@ -1,5 +1,6 @@
 #pragma once
 
+#include <tf2/transform_datatypes.h>
 #include <tf2_ros/buffer.h>
 
 #include <geometry_msgs/msg/pose_stamped.hpp>
@@ -38,11 +39,11 @@ geometry_msgs::msg::Twist getVelocityCommand(const TimedElasticBand &teb, double
                                              int look_ahead_poses, double min_look_ahead_time,
                                              bool holonomic);
 
-bool pruneGlobalPlan(const tf2_ros::Buffer &tf_buffer,
+bool pruneGlobalPlan(const tf2::Transform &plan_to_global,
                      const geometry_msgs::msg::PoseStamped &robot_pose,
                      nav_msgs::msg::Path &global_plan, double dist_behind_robot = 1.0);
 
-nav_msgs::msg::Path transformAndTrimPlan(const tf2_ros::Buffer &tf_buffer,
+nav_msgs::msg::Path transformAndTrimPlan(const tf2::Transform &plan_to_global,
                                          const nav_msgs::msg::Path &global_plan,
                                          const geometry_msgs::msg::PoseStamped &global_pose,
                                          const nav2_costmap_2d::Costmap2D &costmap,

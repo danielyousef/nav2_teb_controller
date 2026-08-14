@@ -226,41 +226,37 @@ geometry_msgs::msg::Twist getVelocityCommand(const TimedElasticBand &teb, double
   return cmd_vel;
 }
 
-bool pruneGlobalPlan(const tf2_ros::Buffer &tf_buffer,
+bool pruneGlobalPlan(const tf2::Transform &plan_to_global,
                      const geometry_msgs::msg::PoseStamped &robot_pose,
                      nav_msgs::msg::Path &global_plan, double dist_behind_robot) {
   if (global_plan.poses.empty()) {
     return true;
   }
-  try {
-    geometry_msgs::msg::PoseStamped robot =
-        tf_buffer.transform(robot_pose, global_plan.poses.front().header.frame_id);
-    const double dist_thresh_sq = dist_behind_robot * dist_behind_robot;
-    auto it = global_plan.poses.begin();
-    auto erase_end = it;
-    while (it != global_plan.poses.end()) {
-      double dx = robot.pose.position.x - it->pose.position.x;
-      double dy = robot.pose.position.y - it->pose.position.y;
-      if (dx * dx + dy * dy < dist_thresh_sq) {
-        erase_end = it;
-        break;
-      }
-      ++it;
+  // Robot pose (global frame) → plan frame by pure math (no TF lookup, no blocking)
+  const tf2::Vector3 robot_global(robot_pose.pose.position.x, robot_pose.pose.position.y, 0.0);
+  const tf2::Vector3 robot_plan = plan_to_global.inverse() * robot_global;
+  const double dist_thresh_sq = dist_behind_robot * dist_behind_robot;
+  auto it = global_plan.poses.begin();
+  auto erase_end = it;
+  while (it != global_plan.poses.end()) {
+    double dx = robot_plan.x() - it->pose.position.x;
+    double dy = robot_plan.y() - it->pose.position.y;
+    if (dx * dx + dy * dy < dist_thresh_sq) {
+      erase_end = it;
+      break;
     }
-    if (erase_end == global_plan.poses.end()) {
-      return false;
-    }
-    if (erase_end != global_plan.poses.begin()) {
-      global_plan.poses.erase(global_plan.poses.begin(), erase_end);
-    }
-  } catch (const tf2::TransformException &ex) {
-    RCLCPP_DEBUG(rclcpp::get_logger("optimal_planner"), "TF transform failed: %s", ex.what());
+    ++it;
+  }
+  if (erase_end == global_plan.poses.end()) {
     return false;
+  }
+  if (erase_end != global_plan.poses.begin()) {
+    global_plan.poses.erase(global_plan.poses.begin(), erase_end);
   }
   return true;
 }
 
-nav_msgs::msg::Path transformAndTrimPlan(const tf2_ros::Buffer &tf_buffer,
+nav_msgs::msg::Path transformAndTrimPlan(const tf2::Transform &plan_to_global,
                                          const nav_msgs::msg::Path &global_plan,
                                          const geometry_msgs::msg::PoseStamped &global_pose,
                                          const nav2_costmap_2d::Costmap2D &costmap,
@@ -271,72 +267,77 @@ nav_msgs::msg::Path transformAndTrimPlan(const tf2_ros::Buffer &tf_buffer,
     return transformed_path;
   }
 
-  const auto &plan_pose = global_plan.poses.front();
-  try {
-    auto plan_to_global =
-        tf_buffer.lookupTransform(global_frame, tf2_ros::fromMsg(now), plan_pose.header.frame_id,
-                                  tf2_ros::fromMsg(plan_pose.header.stamp),
-                                  plan_pose.header.frame_id, tf2::durationFromSec(0.5));
+  // Robot pose (global frame) → plan frame by pure math (no TF lookup, no blocking)
+  const tf2::Vector3 robot_global(global_pose.pose.position.x, global_pose.pose.position.y, 0.0);
+  const tf2::Vector3 robot_plan = plan_to_global.inverse() * robot_global;
 
-    geometry_msgs::msg::PoseStamped robot_pose =
-        tf_buffer.transform(global_pose, plan_pose.header.frame_id);
+  const double dist_threshold =
+      std::max(costmap.getSizeInCellsX() * costmap.getResolution() / 2.0,
+               costmap.getSizeInCellsY() * costmap.getResolution() / 2.0) *
+      0.85;
+  const double sq_dist_threshold = dist_threshold * dist_threshold;
 
-    const double dist_threshold =
-        std::max(costmap.getSizeInCellsX() * costmap.getResolution() / 2.0,
-                 costmap.getSizeInCellsY() * costmap.getResolution() / 2.0) *
-        0.85;
-    const double sq_dist_threshold = dist_threshold * dist_threshold;
-
-    int i = 0;
-    double sq_dist = 1e10;
-    bool robot_reached = false;
-    for (int j = 0; j < static_cast<int>(global_plan.poses.size()); ++j) {
-      double dx = robot_pose.pose.position.x - global_plan.poses[j].pose.position.x;
-      double dy = robot_pose.pose.position.y - global_plan.poses[j].pose.position.y;
-      double new_sq_dist = dx * dx + dy * dy;
-      if (new_sq_dist > sq_dist_threshold) {
-        break;
-      }
-      if (robot_reached && new_sq_dist > sq_dist) {
-        break;
-      }
-      if (new_sq_dist < sq_dist) {
-        sq_dist = new_sq_dist;
-        i = j;
-        if (sq_dist < 0.05) {
-          robot_reached = true;
-        }
+  int i = 0;
+  double sq_dist = 1e10;
+  bool robot_reached = false;
+  for (int j = 0; j < static_cast<int>(global_plan.poses.size()); ++j) {
+    double dx = robot_plan.x() - global_plan.poses[j].pose.position.x;
+    double dy = robot_plan.y() - global_plan.poses[j].pose.position.y;
+    double new_sq_dist = dx * dx + dy * dy;
+    if (new_sq_dist > sq_dist_threshold) {
+      break;
+    }
+    if (robot_reached && new_sq_dist > sq_dist) {
+      break;
+    }
+    if (new_sq_dist < sq_dist) {
+      sq_dist = new_sq_dist;
+      i = j;
+      if (sq_dist < 0.05) {
+        robot_reached = true;
       }
     }
+  }
 
-    geometry_msgs::msg::PoseStamped newer_pose;
-    double plan_length = 0.0;
-    while (i < static_cast<int>(global_plan.poses.size()) && sq_dist <= sq_dist_threshold &&
-           (max_plan_length <= 0.0 || plan_length <= max_plan_length)) {
-      tf2::doTransform(global_plan.poses[i], newer_pose, plan_to_global);
-      transformed_path.poses.push_back(newer_pose);
-      double dx = robot_pose.pose.position.x - global_plan.poses[i].pose.position.x;
-      double dy = robot_pose.pose.position.y - global_plan.poses[i].pose.position.y;
-      sq_dist = dx * dx + dy * dy;
-      if (i > 0 && max_plan_length > 0.0)
-        plan_length += nav2_util::geometry_utils::euclidean_distance(global_plan.poses[i - 1].pose,
-                                                                     global_plan.poses[i].pose);
-      ++i;
-    }
+  // tf2::Transform → stamped message once; doTransform below is pure math.
+  // (Manual fill: tf2::toMsg doesn't match allocator-parameterized rosidl types.)
+  geometry_msgs::msg::TransformStamped plan_to_global_msg;
+  plan_to_global_msg.header.frame_id = global_frame;
+  plan_to_global_msg.header.stamp = now;
+  plan_to_global_msg.transform.translation.x = plan_to_global.getOrigin().x();
+  plan_to_global_msg.transform.translation.y = plan_to_global.getOrigin().y();
+  plan_to_global_msg.transform.translation.z = plan_to_global.getOrigin().z();
+  const tf2::Quaternion plan_to_global_rot = plan_to_global.getRotation();
+  plan_to_global_msg.transform.rotation.x = plan_to_global_rot.x();
+  plan_to_global_msg.transform.rotation.y = plan_to_global_rot.y();
+  plan_to_global_msg.transform.rotation.z = plan_to_global_rot.z();
+  plan_to_global_msg.transform.rotation.w = plan_to_global_rot.w();
 
-    if (transformed_path.poses.empty()) {
-      tf2::doTransform(global_plan.poses.back(), newer_pose, plan_to_global);
-      transformed_path.poses.push_back(newer_pose);
-      if (current_goal_idx) {
-        *current_goal_idx = int(global_plan.poses.size()) - 1;
-      }
-    } else {
-      if (current_goal_idx) {
-        *current_goal_idx = i - 1;
-      }
+  geometry_msgs::msg::PoseStamped newer_pose;
+  double plan_length = 0.0;
+  while (i < static_cast<int>(global_plan.poses.size()) && sq_dist <= sq_dist_threshold &&
+         (max_plan_length <= 0.0 || plan_length <= max_plan_length)) {
+    tf2::doTransform(global_plan.poses[i], newer_pose, plan_to_global_msg);
+    transformed_path.poses.push_back(newer_pose);
+    double dx = robot_plan.x() - global_plan.poses[i].pose.position.x;
+    double dy = robot_plan.y() - global_plan.poses[i].pose.position.y;
+    sq_dist = dx * dx + dy * dy;
+    if (i > 0 && max_plan_length > 0.0)
+      plan_length += nav2_util::geometry_utils::euclidean_distance(global_plan.poses[i - 1].pose,
+                                                                   global_plan.poses[i].pose);
+    ++i;
+  }
+
+  if (transformed_path.poses.empty()) {
+    tf2::doTransform(global_plan.poses.back(), newer_pose, plan_to_global_msg);
+    transformed_path.poses.push_back(newer_pose);
+    if (current_goal_idx) {
+      *current_goal_idx = int(global_plan.poses.size()) - 1;
     }
-  } catch (const tf2::TransformException &) {
-    return nav_msgs::msg::Path();
+  } else {
+    if (current_goal_idx) {
+      *current_goal_idx = i - 1;
+    }
   }
   return transformed_path;
 }

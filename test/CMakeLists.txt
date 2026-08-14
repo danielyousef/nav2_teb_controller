@@ -174,6 +174,14 @@ target_include_directories(test_edge_steering_angle_goal PRIVATE ${CMAKE_SOURCE_
 ament_target_dependencies(test_edge_steering_angle_goal rclcpp)
 target_link_libraries(test_edge_steering_angle_goal ${PROJECT_NAME})
 
+# ── test_planner_graph_lifecycle ──────────────────────────────────────────────
+ament_add_gtest(test_planner_graph_lifecycle
+  unit/planner/test_planner_graph_lifecycle.cpp
+)
+target_include_directories(test_planner_graph_lifecycle PRIVATE ${CMAKE_SOURCE_DIR}/include ${CMAKE_SOURCE_DIR}/include_shim)
+ament_target_dependencies(test_planner_graph_lifecycle rclcpp)
+target_link_libraries(test_planner_graph_lifecycle ${PROJECT_NAME})
+
 # ── test_edge_goal_angular_velocity_zero ──────────────────────────────────────
 ament_add_gtest(test_edge_goal_angular_velocity_zero
   unit/g2o_types/test_edge_goal_angular_velocity_zero.cpp

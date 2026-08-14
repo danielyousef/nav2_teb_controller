@@ -1,5 +1,7 @@
 #include "nav2_teb_controller/teb_controller.hpp"
 
+#include <tf2/time.h>
+
 #include <memory>
 
 #include "nav2_teb_controller/teb_profiler.hpp"
@@ -144,10 +146,28 @@ geometry_msgs::msg::TwistStamped TEBController::computeVelocityCommands(
   nav_msgs::msg::Path transformed_plan;
   {
     PROFILE_BLOCK("prune_trim");
-    pruneGlobalPlan(*tf_, pose, global_plan_, prune_dist);
-    transformed_plan = transformAndTrimPlan(*tf_, global_plan_, pose, *costmap_ros_->getCostmap(),
-                                            costmap_ros_->getGlobalFrameID(), clock_->now(),
-                                            path_length, &goal_idx);
+    // Single latest-known transform lookup (plan frame → global frame). The previous
+    // stamped-time lookup (plan stamp) blocked up to its 0.5 s timeout whenever the
+    // exact stamped transform was not cached yet — the source of single-tick 10 ms
+    // prune_trim spikes. TimePointZero uses the newest available transform; the plan
+    // frame is quasi-static, so this is equivalent except that it never blocks.
+    const std::string plan_frame = global_plan_.poses.front().header.frame_id;
+    try {
+      const geometry_msgs::msg::TransformStamped plan_to_global_stamped =
+          tf_->lookupTransform(costmap_ros_->getGlobalFrameID(), plan_frame, tf2::TimePointZero);
+      // Manual construction: tf2::fromMsg/toMsg templates don't match the
+      // allocator-parameterized rosidl types on all rmw configurations.
+      const auto &t = plan_to_global_stamped.transform;
+      const tf2::Transform plan_to_global(
+          tf2::Quaternion(t.rotation.x, t.rotation.y, t.rotation.z, t.rotation.w),
+          tf2::Vector3(t.translation.x, t.translation.y, t.translation.z));
+      pruneGlobalPlan(plan_to_global, pose, global_plan_, prune_dist);
+      transformed_plan = transformAndTrimPlan(
+          plan_to_global, global_plan_, pose, *costmap_ros_->getCostmap(),
+          costmap_ros_->getGlobalFrameID(), clock_->now(), path_length, &goal_idx);
+    } catch (const tf2::TransformException &ex) {
+      RCLCPP_DEBUG(logger_, "TF transform failed: %s", ex.what());
+    }
 
     if (transformed_plan.poses.empty()) {
       RCLCPP_INFO(logger_, "TEBController: Empty plan.");

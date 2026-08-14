@@ -355,7 +355,8 @@ teb_controller:
         default_value: 100
         description: >
           Maximum number of inner iterations per optimization call; together with no_outer_iterations
-          split equally across the 3 optimization phases. Consumed by: DiscreteTEBPlanner::optimizeTEB.
+          split 25/25/50 across the 3 optimization phases (the first two phases get 1/4 each, the
+          remainder goes to the final full phase). Consumed by: DiscreteTEBPlanner::optimizeTEB.
         validation:
           bounds<>: [1, 1000]
 
@@ -364,7 +365,8 @@ teb_controller:
         default_value: 100
         description: >
           Maximum number of outer iterations per optimization call; together with no_inner_iterations
-          split equally across the 3 optimization phases. Consumed by: DiscreteTEBPlanner::optimizeTEB.
+          split 25/25/50 across the 3 optimization phases (the first two phases get 1/4 each, the
+          remainder goes to the final full phase). Consumed by: DiscreteTEBPlanner::optimizeTEB.
         validation:
           bounds<>: [1, 1000]
 
