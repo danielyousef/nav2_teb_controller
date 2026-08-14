@@ -41,7 +41,27 @@ project-state details live.
 - `make build` / `make format` / `make lint` / `make test` / `make docs` / `make docs-check`
 - Visualization throttled to ~30 Hz in the control loop (publishers are additionally subscriber-gated)
 - `include_shim/tl_expected/expected.hpp` shadows the deprecated parameter_traits header at build time
-  (removes the `#pragma message` deprecation noise; plain `-I` beats `-isystem` /opt/ros)
+  (removes the `#pragma message` deprecation noise; plain `-I` beats `-isystem` /opt/ros). **Permanent
+  for Jazzy**: upstream keeps the deprecated include in `parameter_traits.hpp:37` for backward compat;
+  removal only lands in Lyrical+ — do not wait for a jazzy package update.
+
+### Graph Lifecycle (P4, Stage A)
+- Vertex pooling: `VertexPose`/`VertexTimeDiff` objects are reused across ticks and optimization phases
+  (pool grown on demand in `AddTEBVertices`; g2o never deletes them, see gotcha below) — replaces ~6N
+  `new`s per control tick with value updates.
+- Robust-kernel pooling: `EdgeESDFObstacle` Huber kernels come from `robust_kernel_pool_`, indexed by
+  `robust_kernel_pool_idx_` (reset per phase). The g2o edge destructor does NOT free the kernel
+  (verified against libg2o 2020.5.29 disassembly), so pooled kernels survive `optimizer_->clear()`.
+- Benchmark diagnostics: `teb_profiler` reports per-window scalar samples — `teb_size` (band size) and
+  `outer_iters_{obstacles,kinodynamics,full}` (early-exit vs full iteration budget).
+
+### Plan Pruning / Trimming (performance)
+- `pruneGlobalPlan` + `transformAndTrimPlan` now take a precomputed `tf2::Transform` (plan frame →
+  global frame, latest known, `tf2::TimePointZero`) instead of doing their own blocking TF lookups.
+  The old stamped-time `lookupTransform(..., timeout=0.5 s)` blocked up to the timeout whenever the
+  exact plan-stamp transform was not cached — the source of single-tick ~10 ms `prune_trim` spikes
+  (max_total 13–15.5 ms, loop dips to ~69 Hz). Robot pose → plan frame is now pure math; all distance
+  loops and `doTransform`s are unchanged in semantics.
 
 ## Planned / To Do (Stubs)
 
@@ -77,5 +97,13 @@ project-state details live.
 - Steering feedback (`/tricycle_state`, ackermann msg) is used as initial steering angle for
   `EdgeStartSteeringAngle` / `EdgeSteeringRateStart` and for `saturateSteeringAngle`.
 - `no_inner_iterations` / `no_outer_iterations` are split equally across the 3 optimization phases.
-- `clearGraph()` does NOT delete vertices themselves — only edges (via `optimizer->clear()`); vertices are
-  rebuilt every `buildGraph` call.
+- `clearGraph()` removes the pooled vertices from the optimizer via `HyperGraph::removeVertex`
+  (no deletion) and lets `optimizer->clear()` delete only the per-phase edges. NEVER call
+  `optimizer->clear()` with pooled vertices still in the graph — `HyperGraph::clear()` deletes every
+  vertex it owns (verified in libg2o disassembly), leaving dangling pool pointers (use-after-free).
+- g2o's edge destructor does NOT own/free the robust kernel in this build — pooled kernels survive
+  `clearGraph()` without any detach. Do not `delete` pooled kernels or the optimizer's `clear()` path
+  would double-free. (`setRobustKernel(nullptr)` is only needed if a future g2o takes ownership.)
+- `initFromPath` creates one band pose per global-plan pose **without a `max_samples` cap** (only
+  `autoResize`'s insert path respects it) — a long plan → oversized band on cold start/reinit.
+  Deliberately untouched (tracked separately).
