@@ -974,7 +974,7 @@ void DiscreteTEBPlanner::addEdgesESDFObstacles() {
   for (std::size_t i = 1; i < teb_.sizePoses() - 1; ++i) {
     const Eigen::Vector2d &pos = teb_.pose(i).position();
     arc += (pos - teb_.pose(i - 1).position()).norm();
-    if (total_arc - arc < s_excl)
+    if ((total_arc - arc < s_excl) && !final_goal_)
       break;  // tail: not enough track left to bend around obstacles
 
     // Skip far obstacles
