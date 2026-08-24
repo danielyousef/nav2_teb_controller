@@ -75,6 +75,11 @@ project-state details live.
 - **ESDF-aware autoResize**: nudge midpoint away from obstacles
 - **Recovery behaviors module** (`recovery.*` params unused)
 - **Integration tests** (`test/integration/` is empty; integration test suite planned)
+- **Kinematic constraint rework (PLAN ONLY)**: normalized dimensionless residuals + single
+  `weight_kinematics` + limit-based edge gating (`limit > 0` instead of `weight == 0`), staged toward a
+  violation-feedback weight ramp and an augmented-Lagrangian outer loop. Research-backed design agreed
+  Aug 2026 — see [plan_kinematic_constraints.md](plan_kinematic_constraints.md). Do not implement without
+  revisiting the open decisions listed there.
 - **TEB-K** (cubic Hermite spline segments) — future research feature, **not implemented**
 
 ## Gotchas / Traps
