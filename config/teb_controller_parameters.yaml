@@ -13,8 +13,134 @@ teb_controller:
         type: bool
         default_value: false
         description: >
-          Activate homotopy class planning. NOT IMPLEMENTED YET, keep false: enabling it makes
-          configure() log an error and planning falls back to a stub. Consumed by: TEBController::configure.
+          Activate homotopy class planning: homotopy-distinct candidate paths are found on a
+          Voronoi (GVD) graph extracted from the ESDF, each class is optimized by its own
+          persistent DiscreteTEBPlanner instance, and the best feasible candidate is selected
+          (with class-switch hysteresis). Falls back to the direct planner without obstacle
+          data or when no classes are found. Consumed by: TEBController::configure,
+          HomotopyClassPlanner::plan.
+      max_classes:
+        type: int
+        default_value: 5
+        description: >
+          Maximum number of homotopy classes to explore per tick. Each class costs one full
+          TEB optimization, so this directly scales planning latency. Consumed by:
+          HomotopyClassPlanner::plan (candidate budget).
+        validation:
+          bounds<>: [1, 10]
+      search_rate:
+        type: double
+        default_value: 10.0
+        description: >
+          Rate [Hz] at which the graph search itself (GVD extraction + Yen enumeration) is
+          re-executed, independent of the controller rate. Between refreshes the cached
+          homotopy classes are reused and only the per-class TEB optimization runs. The
+          search is additionally forced when a plan endpoint moved further than
+          trajectory.reinit_dist since the last search. Consumed by: HomotopyClassPlanner::plan.
+        validation:
+          bounds<>: [0.1, 100.0]
+      min_clearance:
+        type: double
+        default_value: 0.3
+        description: >
+          Minimum obstacle clearance [m] for Voronoi (GVD) ridge cells and the graph-search
+          connector segments. This shapes the topology graph only — physical footprint safety
+          is enforced separately by the ESDF obstacle edges and the feasibility gate. Choose
+          well below the footprint circumradius so aisles/corridors remain representable;
+          typical value ≈ 0.2–0.5 × robot radius. Consumed by: TEBController::configure,
+          VoronoiGraphSearch / VisibilityGraphSearch construction.
+        validation:
+          bounds<>: [0.05, 10.0]
+      selection_hysteresis:
+        type: double
+        default_value: 0.9
+        description: >
+          Hysteresis factor for best-route selection: a competing route must be CHEAPER than
+          the current best route by this factor (efficiency_new <= efficiency_best *
+          selection_hysteresis) to take over, where the comparison uses the EFFICIENCY cost
+          category (time-optimal + shortest-path + smoothness edges), not the total chi2.
+          0.9 = the new route needs a 10% efficiency advantage. Prevents flip-flopping
+          between near-equal routes. Consumed by: HomotopyClassPlanner::selectBestCandidate.
+        validation:
+          bounds<>: [0.01, 1.0]
+      route_grace_time:
+        type: double
+        default_value: 1.0
+        description: >
+          Grace period [s] for best-route continuity: when the previous best route's GVD
+          class blinks out of a search round (transient divergence or re-extraction churn)
+          but its route entry still exists, a candidate is re-synthesized from the route's
+          last known polyline so it competes with a fresh cost — instead of the tick
+          collapsing to cheapest-of-the-day and ping-ponging between homotopy classes.
+          After the grace expires (route genuinely gone/blocked) selection proceeds
+          normally. 0 disables. Consumed by:
+          HomotopyClassPlanner::synthesizePrevRouteCandidate.
+        validation:
+          bounds<>: [0.0, 10.0]
+      feasibility_gate:
+        type: bool
+        default_value: true
+        description: >
+          Reject candidates whose optimized band still intersects lethal ESDF cells within
+          the footprint (same check as the controller's hard feasibility stop, applied per
+          candidate after optimization). Through-obstacle bands then never win selection
+          even when their penalty cost is low. Consumed by:
+          HomotopyClassPlanner::passesFeasibilityGate.
+      window_containment:
+        type: bool
+        default_value: true
+        description: >
+          Reject candidates whose optimized band leaves the mapped local-costmap window
+          (0.5 m inward margin). Outside the window the ESDF clamps to its boundary value,
+          so unknown space reads as free and collision-free — such phantom routes carry
+          near-zero costs, win selection, then vanish in later rounds (churn source,
+          benchmark_test_20). Skipped when the band's final pose lies outside the window
+          itself (long-haul legs). Consumed by: HomotopyClassPlanner::staysInWindow.
+      progress_slack:
+        type: double
+        default_value: 0.5
+        description: >
+          Progress guard for best-route takeover: while the current best route is offered,
+          a competing route must not be a detour — its band arc length may exceed the
+          current best's by at most this fraction (0.1 = max 10% longer) IN ADDITION to the
+          efficiency hysteresis. All bands span robot → mission goal, so arc length is a
+          comparable progress estimate (ΣΔt alone barely rewards shorter geometry). Not
+          applied when the current route is missing/infeasible — dead-end escapes may be
+          arbitrarily longer. Consumed by: HomotopyClassPlanner::selectBestCandidateIndex.
+        validation:
+          bounds<>: [0.0, 1.0]
+      efficiency_anchor_floor:
+        type: double
+        default_value: 0.2
+        description: >
+          Distrust threshold for the efficiency hysteresis anchor: anchors below this floor
+          come from bands that read free space beyond the mapped local-costmap window
+          (benchmark_test_20 anchors of 0.007–0.07) and are meaningless. While such a route
+          is current best, it loses its hysteresis/progress protection and its ranking
+          privilege — realistic competitors take over by plain min-cost; the distrusted
+          route remains available as a last-resort fallback. Set 0 to disable. Consumed by:
+          HomotopyClassPlanner::selectBestCandidateIndex.
+        validation:
+          bounds<>: [0.0, 100.0]
+      switch_block_time:
+        type: double
+        default_value: 2.0
+        description: >
+          Time [s] after a best-route switch during which further switches are blocked outright,
+          regardless of cost differences (unless the current best route becomes infeasible).
+          Tune to the robot's dynamics — slow machines need longer blocks. Consumed by:
+          HomotopyClassPlanner::selectBestCandidate.
+        validation:
+          bounds<>: [0.0, 30.0]
+      parallel_optimization:
+        type: bool
+        default_value: true
+        description: >
+          Optimize the per-route TEB candidates in parallel (one thread per route). Route
+          identity assignment and best-route selection remain sequential; each route owns an
+          isolated optimizer instance, so solves are independent. Set false to force
+          sequential optimization (debugging / single-core targets). Consumed by:
+          HomotopyClassPlanner::optimizeCandidates.
 
     path_tracker:
       activate:

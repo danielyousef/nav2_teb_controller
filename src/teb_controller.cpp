@@ -68,12 +68,15 @@ void TEBController::configure(const rclcpp_lifecycle::LifecycleNode::WeakPtr &pa
   visualize_update_period_ = rclcpp::Duration::from_seconds(1.0 / visu_hz);
   // Planner
   if (params_.FollowPath.hcp.activate) {
-    RCLCPP_ERROR(logger_,
-                 "TEBController: Homotopy class planning is NOT implemented yet. "
-                 "Disable 'hcp.activate' — falling back to direct planner is not possible either, "
-                 "the HCP placeholder will fail at plan() time.");
+    // Topology-only clearance: the GVD graph must stay representable inside aisles.
+    // Physical footprint safety is enforced by the ESDF edges + feasibility gate, not here.
+    const double hcp_min_clearance = params_.FollowPath.hcp.min_clearance;
+    RCLCPP_INFO(logger_,
+                "TEBController: Homotopy class planning enabled (Voronoi GVD search, "
+                "min_clearance=%.3f m).",
+                hcp_min_clearance);
     auto p = std::make_shared<DiscreteTEBPlanner>(params_, footprint_, costmap_ros_.get());
-    auto gs = std::make_shared<VisibilityGraphSearch>();
+    auto gs = std::make_shared<VoronoiGraphSearch>(hcp_min_clearance);
     auto hcp = std::make_unique<HomotopyClassPlanner>(params_, footprint_, costmap_ros_.get());
     hcp->setBasePlanner(p);
     hcp->setGraphSearch(gs);
@@ -246,16 +249,20 @@ geometry_msgs::msg::TwistStamped TEBController::computeVelocityCommands(
       visualizer_->publishObstacles(obstacles_ptr, frame_id);
       visualizer_->publishCurvatureRadii(teb, frame_id);
       visualizer_->publishFootprint(teb.pose(std::max(index, 0)), footprint_, frame_id);
-    }
-  }
 
-  if (params_.FollowPath.hcp.activate) {
-    if (auto *hcp = dynamic_cast<const HomotopyClassPlanner *>(planner_.get())) {
-      if (auto *vgs =
-              dynamic_cast<const VisibilityGraphSearch *>(hcp->getGraphSearch())) {
-        visualizer_->publishVisibilityGraph(vgs->getVisibilityGraph(), frame_id);
+      // HCP graph-search visualization shares the same throttle window
+      if (params_.FollowPath.hcp.activate) {
+        if (auto *hcp = dynamic_cast<const HomotopyClassPlanner *>(planner_.get())) {
+          if (auto *vgs = dynamic_cast<const VoronoiGraphSearch *>(hcp->getGraphSearch())) {
+            visualizer_->publishVisibilityGraph(vgs->getVoronoiGraph(), frame_id, &esdf_);
+          } else if (auto *vgs2 =
+                         dynamic_cast<const VisibilityGraphSearch *>(hcp->getGraphSearch())) {
+            visualizer_->publishVisibilityGraph(vgs2->getVisibilityGraph(), frame_id, &esdf_);
+          }
+          visualizer_->publishHCPCandidates(hcp->getCandidates(), frame_id,
+                                            hcp->bestCandidateIdx());
+        }
       }
-      visualizer_->publishHCPCandidates(hcp->getCandidates(), frame_id);
     }
   }
 

@@ -39,6 +39,10 @@ void updateAndPrune(TimedElasticBand &teb, const PoseSE2 &new_start, const PoseS
 
 double computeCurvature(const PoseSE2 &p1, const PoseSE2 &p2, const PoseSE2 &p3);
 
+/// @brief Radius of the smallest circle covering the footprint (max |offset| + radius over
+/// all footprint circles). Used as minimum clearance for graph searches and feasibility.
+double footprintCircumRadius(const Footprint &fp);
+
 int checkFeasibility(const TimedElasticBand &teb, const ObstacleMap2D &esdf, const Footprint &fp,
                      double lookahead);
 

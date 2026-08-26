@@ -554,6 +554,12 @@ void DiscreteTEBPlanner::computeCurrentCost() {
 
   cost_ = total_cost;
 
+  // Efficiency category: the phase-Full objective trio. Used by HCP candidate selection
+  // (efficiency hysteresis) — deliberately NOT the total chi2, which is dominated by
+  // obstacle-proximity penalties and is noisy across homotopy classes.
+  efficiency_cost_ = edge_type_costs["EdgeTimeOptimal"] + edge_type_costs["EdgeShortestPath"] +
+                     edge_type_costs["EdgePathSmoothness"];
+
   if (!params_.FollowPath.optimizer.verbose)
     return;
 
@@ -882,6 +888,8 @@ void DiscreteTEBPlanner::AddEdgesStartSteeringAngle() {
 
 void DiscreteTEBPlanner::extractObstacles() {
   obstacles_.clear();
+  if (costmap_ros_ == nullptr)
+    return;  // headless/unit-test construction: no costmap to extract from
   auto *costmap = costmap_ros_->getCostmap();
 
   // Nur LETHAL-Zellen → Punkt-Obstacles

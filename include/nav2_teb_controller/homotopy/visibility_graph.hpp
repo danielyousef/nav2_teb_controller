@@ -37,9 +37,10 @@ public:
    * @param start Start position
    * @param goal Goal position
    * @param obstacles Current obstacle array
+   * @param min_clearance Required obstacle clearance for edges and keypoints [m]
    */
   void build(const Eigen::Vector2d &start, const Eigen::Vector2d &goal,
-             const ObstacleArray &obstacles);
+             const ObstacleArray &obstacles, double min_clearance);
 
   /** @brief Set the ESDF for collision-free visibility checks */
   void setObstacleMap(const ObstacleMap2D *esdf) { esdf_ = esdf; }
@@ -48,7 +49,9 @@ public:
   [[nodiscard]] const std::vector<VisibilityNode> &nodes() const { return nodes_; }
 
   /** @brief Get adjacency list for a node */
-  [[nodiscard]] const std::vector<VisibilityEdge> &edges(int node_id) const { return adj_[node_id]; }
+  [[nodiscard]] const std::vector<VisibilityEdge> &edges(int node_id) const {
+    return adj_[node_id];
+  }
 
   [[nodiscard]] int startId() const { return start_id_; }
   [[nodiscard]] int goalId() const { return goal_id_; }
@@ -69,6 +72,7 @@ private:
       const costmap_converter_msgs::msg::ObstacleMsg &obs) const;
 
   const ObstacleMap2D *esdf_{nullptr};
+  double min_clearance_{0.2};
   std::vector<VisibilityNode> nodes_;
   std::vector<std::vector<VisibilityEdge>> adj_;
   int start_id_ = -1;

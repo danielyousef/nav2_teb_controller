@@ -199,6 +199,13 @@ double computeCurvature(const PoseSE2 &p1, const PoseSE2 &p2, const PoseSE2 &p3)
   return copysign(kappa, cross_prod);
 }
 
+double footprintCircumRadius(const Footprint &fp) {
+  double radius = 0.0;
+  for (const auto &c : fp.circles())
+    radius = std::max(radius, c.offset.norm() + c.radius);
+  return radius;
+}
+
 int checkFeasibility(const TimedElasticBand &teb, const ObstacleMap2D &esdf, const Footprint &fp,
                      double lookahead) {
   double progress = 0.0;

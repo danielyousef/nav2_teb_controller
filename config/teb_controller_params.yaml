@@ -36,6 +36,16 @@ controller_server:
       hcp:
         activate: true
         max_classes: 5
+        search_rate: 10.0 # GVD + Yen re-enumeration rate; per-class TEB optimization still runs every tick
+        min_clearance: 0.6 # topology-only clearance (NOT footprint-sized); safety comes from ESDF edges + feasibility gate
+        selection_hysteresis: 0.9 # new route needs 10% cost advantage to take over
+        route_grace_time: 1.0
+        feasibility_gate: true
+        window_containment: true
+        progress_slack: 0.5
+        efficiency_anchor_floor: 0.2
+        switch_block_time: 2.0 # no further switches for 2 s after a switch (slow dynamics)
+        parallel_optimization: true # one thread per route TEB solve
       trajectory:
         reinit_dist: 2.0
         reinit_angle: 3.14159

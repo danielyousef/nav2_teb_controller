@@ -14,7 +14,16 @@ struct TebCandidate {
 
   TimedElasticBand teb;
   HSignature h_signature;
+  int route_id = -1;  ///< Stable geometric identity across ticks (see HomotopyClassPlanner)
   double optimization_cost = std::numeric_limits<double>::infinity();
+  /// Summed chi2 over the efficiency-category edges (time optimal + shortest path +
+  /// smoothness), normalized by pose count. Drives best-candidate selection/hysteresis —
+  /// unlike optimization_cost it excludes obstacle-proximity noise.
+  double efficiency_cost = std::numeric_limits<double>::infinity();
+  /// Arc length [m] of the optimized band (robot pose → mission-goal seed). Comparable
+  /// across candidates — all bands span the same endpoints — and used by the progress
+  /// guard so takeovers by longer detours require an explicit slack.
+  double path_length = std::numeric_limits<double>::infinity();
   bool is_feasible = false;
   bool has_diverged = false;
 

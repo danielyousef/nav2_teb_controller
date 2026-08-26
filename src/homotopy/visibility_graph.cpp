@@ -8,11 +8,12 @@
 namespace nav2_teb_controller {
 
 void VisibilityGraph::build(const Eigen::Vector2d &start, const Eigen::Vector2d &goal,
-                            const ObstacleArray &obstacles) {
+                            const ObstacleArray &obstacles, double min_clearance) {
   nodes_.clear();
   adj_.clear();
   start_id_ = -1;
   goal_id_ = -1;
+  min_clearance_ = min_clearance;
 
   // --- Step 1: Collect all nodes ---
   int id = 0;
@@ -25,12 +26,12 @@ void VisibilityGraph::build(const Eigen::Vector2d &start, const Eigen::Vector2d 
   nodes_.push_back({goal, id, false, true});
   goal_id_ = id++;
 
-  // Obstacle keypoints (raw polygon vertices, no inflation)
+  // Obstacle keypoints: raw polygon vertices pushed OUTWARD from the polygon centroid by
+  // min_clearance so edges touching them can satisfy the clearance test.
   for (const auto &obs : obstacles.obstacles) {
     auto kp = extractKeypoints(obs);
-    for (auto &pt : kp) {
+    for (auto &pt : kp)
       nodes_.push_back({pt, id++, false, false});
-    }
   }
 
   // --- Step 2: Build adjacency list using ESDF-based visibility ---
@@ -47,16 +48,17 @@ void VisibilityGraph::build(const Eigen::Vector2d &start, const Eigen::Vector2d 
     }
   }
 
+  size_t edge_count = 0;
+  for (const auto &a : adj_)
+    edge_count += a.size();
   RCLCPP_DEBUG(rclcpp::get_logger("VisibilityGraph"),
-               "Built visibility graph: %zu nodes, ~%zu edges",
-               nodes_.size(), adj_.size());
+               "Built visibility graph: %zu nodes, %zu edges (undirected)", nodes_.size(),
+               edge_count / 2);
 }
 
-bool VisibilityGraph::isVisible(const Eigen::Vector2d &p1,
-                                const Eigen::Vector2d &p2) const {
+bool VisibilityGraph::isVisible(const Eigen::Vector2d &p1, const Eigen::Vector2d &p2) const {
   if (!esdf_) {
-    RCLCPP_WARN(rclcpp::get_logger("VisibilityGraph"),
-                "No ESDF set — visibility check skipped");
+    RCLCPP_WARN(rclcpp::get_logger("VisibilityGraph"), "No ESDF set — visibility check skipped");
     return true;
   }
 
@@ -71,10 +73,10 @@ bool VisibilityGraph::isVisible(const Eigen::Vector2d &p1,
   for (int i = 0; i <= n_samples; ++i) {
     double t = static_cast<double>(i) / n_samples;
     Eigen::Vector2d pt = p1 + t * (p2 - p1);
-    double dist = esdf_->query(pt.x(), pt.y()).distance;
+    const double dist = esdf_->queryDistance(pt.x(), pt.y());
 
-    // If any sample point is inside an obstacle (distance < 0), segment is blocked
-    if (dist < 0.0)
+    // Blocked when the segment dips below the required clearance
+    if (dist < min_clearance_)
       return false;
   }
 
@@ -89,9 +91,16 @@ std::vector<Eigen::Vector2d> VisibilityGraph::extractKeypoints(
   if (poly.points.empty())
     return kp;
 
+  Eigen::Vector2d center(0.0, 0.0);
+  for (const auto &pt : poly.points)
+    center += Eigen::Vector2d(pt.x, pt.y);
+  center /= static_cast<double>(poly.points.size());
+
   kp.reserve(poly.points.size());
   for (const auto &pt : poly.points) {
-    kp.emplace_back(pt.x, pt.y);
+    Eigen::Vector2d v(pt.x, pt.y);
+    const Eigen::Vector2d outward = (v - center).normalized();
+    kp.emplace_back(v + outward * min_clearance_);
   }
 
   return kp;

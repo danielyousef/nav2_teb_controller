@@ -254,8 +254,11 @@ public:
     footprint_markers_pub_->publish(marker_array);
   }
 
-  /// @brief Publish visibility graph nodes and edges for RViz debugging
-  void publishVisibilityGraph(const VisibilityGraph &graph, const std::string &frame_id) {
+  /// @brief Publish graph-search nodes and edges (visibility or Voronoi) for RViz debugging.
+  /// GraphT needs: nodes() → {.pos, .id, .is_start, .is_goal}, edges(int) → {.from_id, .to_id}.
+  template <typename GraphT>
+  void publishVisibilityGraph(const GraphT &graph, const std::string &frame_id,
+                              const ObstacleMap2D *obstacle_map = nullptr) {
     if (vis_graph_pub_->get_subscription_count() == 0)
       return;
 
@@ -263,7 +266,6 @@ public:
     const auto stamp = node_->now();
 
     const auto &nodes = graph.nodes();
-    const auto &obstacle_map = graph.obstacleMap();
 
     // Edges as LINE_LIST
     visualization_msgs::msg::Marker edge_marker;
@@ -280,7 +282,7 @@ public:
     edge_marker.color.b = 1.0f;
     edge_marker.color.a = 0.5f;
 
-    std::set<std::pair<int,int>> added_edges;
+    std::set<std::pair<int, int>> added_edges;
     for (int i = 0; i < static_cast<int>(nodes.size()); ++i) {
       for (const auto &e : graph.edges(i)) {
         auto key = std::make_pair(std::min(e.from_id, e.to_id), std::max(e.from_id, e.to_id));
@@ -395,9 +397,11 @@ public:
     vis_graph_pub_->publish(markers);
   }
 
-  /// @brief Publish all HCP candidate paths in different colors
+  /// @brief Publish all HCP candidate paths. Colors are keyed by route_id (stable across
+  /// ticks); the currently selected candidate is drawn thick/opaque so RViz shows which
+  /// route actually drives.
   void publishHCPCandidates(const std::vector<TebCandidate::Ptr> &candidates,
-                            const std::string &frame_id) {
+                            const std::string &frame_id, int best_idx = -1) {
     if (hcp_candidates_pub_->get_subscription_count() == 0)
       return;
 
@@ -409,6 +413,11 @@ public:
       if (teb.sizePoses() < 2)
         continue;
 
+      // Golden-ratio hue hop from route_id → stable per-route colors
+      const int route_id = std::max(candidates[i]->route_id, 0);
+      const double hue = std::fmod(static_cast<double>(route_id) * 0.6180339887, 1.0);
+      const bool is_best = (static_cast<int>(i) == best_idx);
+
       visualization_msgs::msg::Marker marker;
       marker.header.frame_id = frame_id;
       marker.header.stamp = stamp;
@@ -417,15 +426,13 @@ public:
       marker.type = visualization_msgs::msg::Marker::LINE_STRIP;
       marker.action = visualization_msgs::msg::Marker::ADD;
       marker.lifetime = rclcpp::Duration::from_seconds(0.2);
-      marker.scale.x = 0.04;
+      marker.scale.x = is_best ? 0.10 : 0.035;
       marker.pose.orientation.w = 1.0;
 
-      // Color by index along HSV
-      double hue = static_cast<double>(i) / std::max(candidates.size(), size_t(1));
       marker.color.r = static_cast<float>(sin(hue * 2.0 * M_PI) * 0.5 + 0.5);
-      marker.color.g = static_cast<float>(sin((hue + 1.0/3.0) * 2.0 * M_PI) * 0.5 + 0.5);
-      marker.color.b = static_cast<float>(sin((hue + 2.0/3.0) * 2.0 * M_PI) * 0.5 + 0.5);
-      marker.color.a = candidates[i]->is_feasible ? 0.9f : 0.3f;
+      marker.color.g = static_cast<float>(sin((hue + 1.0 / 3.0) * 2.0 * M_PI) * 0.5 + 0.5);
+      marker.color.b = static_cast<float>(sin((hue + 2.0 / 3.0) * 2.0 * M_PI) * 0.5 + 0.5);
+      marker.color.a = is_best ? 1.0f : (candidates[i]->is_feasible ? 0.45f : 0.2f);
 
       for (size_t j = 0; j < teb.sizePoses(); ++j) {
         geometry_msgs::msg::Point pt;
@@ -450,8 +457,7 @@ public:
         node_->create_publisher<visualization_msgs::msg::MarkerArray>("teb_radius_markers", 1);
     footprint_markers_pub_ =
         node_->create_publisher<visualization_msgs::msg::MarkerArray>("footprint_markers", 1);
-    vis_graph_pub_ =
-        node_->create_publisher<visualization_msgs::msg::MarkerArray>("vis_graph", 1);
+    vis_graph_pub_ = node_->create_publisher<visualization_msgs::msg::MarkerArray>("vis_graph", 1);
     hcp_candidates_pub_ =
         node_->create_publisher<visualization_msgs::msg::MarkerArray>("hcp_candidates", 1);
     return nav2_util::CallbackReturn::SUCCESS;

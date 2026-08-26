@@ -1,7 +1,9 @@
 #include "nav2_teb_controller/homotopy/h_signature.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <limits>
+#include <numeric>
 
 namespace nav2_teb_controller {
 
@@ -16,48 +18,71 @@ void HSignature::compute(const std::vector<PoseSE2> &path, const ObstacleArray &
   if (n_obstacles == 0)
     return;
 
+  // Canonical obstacle ordering: the converter's array order is not stable across ticks,
+  // and signature components are compared positionally (isEqual). Sorting indices by
+  // centroid makes signatures identical for the same obstacle SET regardless of order —
+  // per-class planners keep matching across ticks (warm starts persist).
+  std::vector<Eigen::Vector2d> centers(n_obstacles);
+  for (size_t k = 0; k < n_obstacles; ++k) {
+    centers[k].setZero();
+    const auto &poly = obstacles.obstacles[k].polygon.points;
+    if (poly.empty())
+      continue;
+    for (const auto &pt : poly)
+      centers[k] += Eigen::Vector2d(pt.x, pt.y);
+    centers[k] /= static_cast<double>(poly.size());
+  }
+
+  std::vector<size_t> order(n_obstacles);
+  std::iota(order.begin(), order.end(), 0);
+  constexpr double kCentroidEps = 1e-6;
+  std::sort(order.begin(), order.end(), [&centers](size_t a, size_t b) {
+    const Eigen::Vector2d &ca = centers[a];
+    const Eigen::Vector2d &cb = centers[b];
+    if (std::abs(ca.x() - cb.x()) > kCentroidEps)
+      return ca.x() < cb.x();
+    return ca.y() < cb.y();
+  });
+
   // Initialize signatures to zero
   std::vector<double> cumulative(n_obstacles, 0.0);
 
-  // For each segment in the path
-  for (size_t seg = 0; seg < path.size() - 1; ++seg) {
+  // Net swept angle per obstacle: sum of principal-value segment rotations. For fine
+  // paths this accumulates the CONTINUOUS polar angle change, including multiples of
+  // 2*pi for every full encirclement.
+  for (size_t seg = 0; seg + 1 < path.size(); ++seg) {
     const Eigen::Vector2d p1 = path[seg].position();
     const Eigen::Vector2d p2 = path[seg + 1].position();
-
-    // For each obstacle
     for (size_t k = 0; k < n_obstacles; ++k) {
-      const auto &obs = obstacles.obstacles[k];
-      // Compute obstacle center as centroid of polygon
-      Eigen::Vector2d center(0, 0);
-      if (obs.polygon.points.empty())
-        continue;
-      for (const auto &pt : obs.polygon.points) {
-        center.x() += pt.x;
-        center.y() += pt.y;
-      }
-      center /= static_cast<double>(obs.polygon.points.size());
-
-      // Contribution = signed angle of segment as seen from obstacle center
-      // This is the imaginary part of log((p2 - z_k) / (p1 - z_k))
-      Eigen::Vector2d v1 = p1 - center;
-      Eigen::Vector2d v2 = p2 - center;
-
-      double cross = v1.x() * v2.y() - v1.y() * v2.x();
-      double dot = v1.x() * v2.x() + v1.y() * v2.y();
-
-      double angle = std::atan2(cross, dot);
-      cumulative[k] += angle;
+      const Eigen::Vector2d v1 = p1 - centers[k];
+      const Eigen::Vector2d v2 = p2 - centers[k];
+      if (v1.squaredNorm() < 1e-12 || v2.squaredNorm() < 1e-12)
+        continue;  // degenerate: path point on obstacle center
+      cumulative[k] +=
+          std::atan2(v1.x() * v2.y() - v1.y() * v2.x(), v1.x() * v2.x() + v1.y() * v2.y());
     }
   }
 
-  // Normalize and store as complex numbers
-  // The real part encodes the winding number, the imaginary part is 0
-  // (we store only the cumulative angle in the complex component)
+  // Homotopy invariant: the swept angle minus the principal endpoint angle leaves the
+  // pure integer winding count. Raw swept angles are geometry-dependent (a path merely
+  // PASSING NEAR an obstacle subtends a nonzero angle) and would not compare equal
+  // within one class.
+  const Eigen::Vector2d &p_first = path.front().position();
+  const Eigen::Vector2d &p_last = path.back().position();
+
   signature_.reserve(n_obstacles);
-  for (size_t k = 0; k < n_obstacles; ++k) {
-    // Store as complex where real = cumulative angle / (2*PI)
-    // This gives the winding number contribution for each obstacle
-    signature_.emplace_back(cumulative[k] / (2.0 * M_PI), 0.0);
+  for (const size_t k : order) {
+    const Eigen::Vector2d v0 = p_first - centers[k];
+    const Eigen::Vector2d v1 = p_last - centers[k];
+    double principal_delta = 0.0;
+    if (v0.squaredNorm() >= 1e-12 && v1.squaredNorm() >= 1e-12) {
+      // Principal-value rotation from v0 to v1 (same convention as the segment sum)
+      principal_delta =
+          std::atan2(v0.x() * v1.y() - v0.y() * v1.x(), v0.x() * v1.x() + v0.y() * v1.y());
+    }
+    const double winding = (cumulative[k] - principal_delta) / (2.0 * M_PI);
+    // Snap to the nearest integer: kills numerical drift of the accumulated angles
+    signature_.emplace_back(std::round(winding), 0.0);
   }
 }
 
@@ -79,19 +104,6 @@ bool HSignature::isValid() const {
       return false;
   }
   return true;
-}
-
-std::complex<double> HSignature::computeSegmentContribution(
-    const Eigen::Vector2d &p1, const Eigen::Vector2d &p2,
-    const Eigen::Vector2d &obs_center) const {
-  Eigen::Vector2d v1 = p1 - obs_center;
-  Eigen::Vector2d v2 = p2 - obs_center;
-
-  double cross = v1.x() * v2.y() - v1.y() * v2.x();
-  double dot = v1.x() * v2.x() + v1.y() * v2.y();
-
-  double angle = std::atan2(cross, dot);
-  return std::complex<double>(angle / (2.0 * M_PI), 0.0);
 }
 
 }  // namespace nav2_teb_controller

@@ -6,7 +6,7 @@
 // uncomment the define below, or build with -DBENCHMARK_TESTING.
 // When disabled, all PROFILE_* macros expand to nothing -> zero overhead.
 
-// #define BENCHMARK_TESTING
+#define BENCHMARK_TESTING
 
 #include <algorithm>
 #include <chrono>
@@ -20,13 +20,19 @@
 namespace nav2_teb_controller {
 
 #ifdef BENCHMARK_TESTING
+#include <mutex>
 
 class TebProfiler {
 public:
-  // Counts control-loop ticks; report() fires once the window is full.
-  void tick() { ++tick_; }
+  // Thread-safety: route optimizations run on parallel worker threads; every record
+  // path locks. Cheap relative to the measured sections.
+  void tick() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    ++tick_;
+  }
 
   void recordBlock(const std::string &name, int64_t elapsed_ns) {
+    std::lock_guard<std::mutex> lock(mutex_);
     auto &acc = blocks_[name];
     ++acc.count;
     acc.total_ns += elapsed_ns;
@@ -37,6 +43,7 @@ public:
   // window; reported alongside the timing blocks with per-window avg/max.
   // Values are stored in milli-units to keep int64 precision.
   void recordScalar(const std::string &name, double value) {
+    std::lock_guard<std::mutex> lock(mutex_);
     auto &acc = scalars_[name];
     ++acc.count;
     acc.total_ns += static_cast<int64_t>(value * 1000.0);
@@ -46,6 +53,7 @@ public:
   // Returns a formatted summary table once the window is full (and resets the window),
   // otherwise an empty string.
   std::string report() {
+    std::lock_guard<std::mutex> lock(mutex_);
     if (tick_ < kReportEveryTicks)
       return {};
     tick_ = 0;
@@ -94,6 +102,8 @@ private:
   std::unordered_map<std::string, Accum> scalars_;
   uint32_t tick_ = 0;
   static constexpr uint32_t kReportEveryTicks = 100;
+
+  mutable std::mutex mutex_;
 };
 
 inline TebProfiler &tebProfiler() {

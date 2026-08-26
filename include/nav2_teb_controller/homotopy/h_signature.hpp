@@ -47,16 +47,6 @@ public:
   [[nodiscard]] const std::vector<std::complex<double>> &signature() const { return signature_; }
 
 private:
-  /**
-   * @brief Compute winding number contribution of one segment
-   * @param p1 Start of segment
-   * @param p2 End of segment
-   * @param obs_center Obstacle center
-   */
-  [[nodiscard]] std::complex<double> computeSegmentContribution(const Eigen::Vector2d &p1,
-                                                  const Eigen::Vector2d &p2,
-                                                  const Eigen::Vector2d &obs_center) const;
-
   std::vector<std::complex<double>> signature_;
 };
 

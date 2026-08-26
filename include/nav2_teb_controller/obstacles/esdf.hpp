@@ -115,6 +115,19 @@ public:
   [[nodiscard]] double originX() const { return origin_x_; }
   [[nodiscard]] double originY() const { return origin_y_; }
 
+  /// @brief Whether the world point lies inside the mapped window (with @p margin [m]
+  /// shrunk inward). Outside the window the ESDF clamps to the boundary value — i.e.
+  /// unknown space reads as free — so callers use this to reject bands that leave it.
+  [[nodiscard]] bool contains(double wx, double wy, double margin = 0.0) const {
+    if (!isInitialized())
+      return false;
+    const double min_x = origin_x_ + margin;
+    const double max_x = origin_x_ + static_cast<double>(nx_) * res_ - margin;
+    const double min_y = origin_y_ + margin;
+    const double max_y = origin_y_ + static_cast<double>(ny_) * res_ - margin;
+    return wx >= min_x && wx <= max_x && wy >= min_y && wy <= max_y;
+  }
+
   /// @brief Raw EDT grid (float, meters), row-major. Useful for publishing.
   [[nodiscard]] const std::vector<float> &rawGrid() const { return edt_; }
 

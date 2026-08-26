@@ -21,6 +21,9 @@ class PlannerInterface : public PlannerBase {
 public:
   [[nodiscard]] virtual const TEBType &getTEB() const = 0;
   [[nodiscard]] virtual double getCost() const = 0;
+  /// Summed chi2 over the efficiency-category edges (time optimal + shortest path +
+  /// smoothness). Defaults to the total cost for planners without a category split.
+  [[nodiscard]] virtual double getEfficiencyCost() const { return getCost(); }
   virtual void setFeedback(const ackermann_msgs::msg::AckermannDrive &feedback) = 0;
   virtual void updateObstacleContainer(
       costmap_converter_msgs::msg::ObstacleArrayMsg::ConstSharedPtr obstacle_array = nullptr) = 0;

@@ -89,6 +89,11 @@ public:
 
   [[nodiscard]] double getCost() const override { return cost_; }
 
+  /// Summed chi2 over the efficiency-category edges (EdgeTimeOptimal + EdgeShortestPath +
+  /// EdgePathSmoothness). Fresh after plan() — computeCurrentCost() runs after every
+  /// optimizeGraph() call.
+  [[nodiscard]] double getEfficiencyCost() const override { return efficiency_cost_; }
+
   void setFeedback(const ackermann_msgs::msg::AckermannDrive &feedback) override {
     ackermann_feedback_ = feedback;
   }
@@ -211,6 +216,7 @@ protected:
   bool initialized_ = false;
   bool optimized_ = false;
   double cost_ = 0.0;
+  double efficiency_cost_ = std::numeric_limits<double>::max();
   double weight_multiplier_ = 0.0;
 
   EIGEN_MAKE_ALIGNED_OPERATOR_NEW

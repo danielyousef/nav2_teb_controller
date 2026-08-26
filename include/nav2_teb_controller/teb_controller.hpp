@@ -29,6 +29,7 @@
 #include "nav2_teb_controller/band_controller/band_controller.hpp"
 #include "nav2_teb_controller/band_controller/feed_forward_controller.hpp"
 #include "nav2_teb_controller/path_handler.hpp"
+#include "nav2_teb_controller/homotopy/voronoi_graph_search.hpp"
 #include "nav2_teb_controller/planner/optimal_planner.hpp"
 #include "nav2_teb_controller/planner/planner_interface.hpp"
 #include "nav2_teb_controller/visualization/teb_visualizer.hpp"
