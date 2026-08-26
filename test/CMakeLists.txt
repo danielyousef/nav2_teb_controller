@@ -206,3 +206,10 @@ target_include_directories(test_path_handler PRIVATE ${CMAKE_SOURCE_DIR}/include
 ament_target_dependencies(test_path_handler rclcpp nav2_costmap_2d tf2_ros)
 target_link_libraries(test_path_handler ${PROJECT_NAME} teb_controller_parameters)
 ament_target_dependencies(test_path_handler rclcpp nav2_costmap_2d tf2_ros)
+# ── test_homotopy ─────────────────────────────────────────────────────────────
+ament_add_gtest(test_homotopy
+  unit/homotopy/test_homotopy.cpp
+)
+target_include_directories(test_homotopy PRIVATE ${CMAKE_SOURCE_DIR}/include ${CMAKE_SOURCE_DIR}/include_shim)
+ament_target_dependencies(test_homotopy rclcpp costmap_converter_msgs)
+target_link_libraries(test_homotopy ${PROJECT_NAME})

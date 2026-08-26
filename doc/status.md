@@ -6,6 +6,23 @@ project-state details live.
 
 ## Implemented
 
+### Homotopy Class Planning (HCP)
+- `HomotopyClassPlanner`: homotopy-distinct candidate paths → per-class TEB optimization →
+  best-candidate selection with class-switch hysteresis and pose-normalized cost comparison.
+  One persistent `DiscreteTEBPlanner` per homotopy class (matched via H-signature across ticks,
+  LRU-bounded + TTL-pruned) — candidates never contaminate each other's warm start.
+- `VoronoiGraphSearch` (default): reduced Generalized Voronoi Diagram extracted from the ESDF
+  (ridge cells ≥ min_clearance, spur pruning, junction/endpoint reduction, Steiner-subdivided
+  edges, closed-loop splitting, clearance-checked start/goal connectors). All paths keep at
+  least the footprint circumradius from obstacles by construction.
+- `VisibilityGraphSearch` (fallback): polygon keypoints offset outward, ESDF clearance-thresholded
+  visibility.
+- Shared graph algorithms (`graph_algorithms.hpp`): templated Dijkstra / Yen K-shortest paths /
+  path-to-poses / H-signature dedup; searches loop with growing K until enough DISTINCT classes.
+- `HSignature`: winding-number invariant (swept angle minus principal endpoint delta, snapped to
+  integer) — same-class paths compare equal regardless of geometry.
+- Grows-K enumeration lives in both searches; `hcp.max_classes` bounds the per-tick class budget.
+
 ### Controller & Integration
 - TEBController plugin lifecycle (configure/activate/deactivate/cleanup) + `setPlan`,
   `computeVelocityCommands`, `setSpeedLimit`
@@ -74,9 +91,10 @@ project-state details live.
 
 ## Planned / To Do (Stubs)
 
-- **Homotopy Class Planning (TBD)**: `HomotopyClassPlanner::plan()`, `VisibilityGraphSearch::search()`,
-  `VisibilityGraph::build()`, `HSignature::compute()` are stubs. Keep `hcp.activate: false`;
-  `configure()` logs an error if enabled. (interfaces in `include/nav2_teb_controller/homotopy/`)
+- **HCP refinements (see [plan_hcp_voronoi.md](plan_hcp_voronoi.md))**: obstacle sets that
+  enter/leave the sliding window legitimately reset class identity (signature size changes);
+  `max_classes` sequential solves scale planning latency (~1 solve per class per tick); grid
+  connected-component signatures (dropping costmap_converter from HCP) deferred.
 - **Via points**: `EdgeViaPoints` / `AddEdgesViaPoints` (empty)
 - **Preferred rotation direction**: `AddEdgesPreferRotDir` / `edge_prefer_rotdir.h` (not wired)
 - **Legacy costmap obstacle association**: `AddEdgesObstacles` / `edge_costmap_obstacle.h` (not wired;

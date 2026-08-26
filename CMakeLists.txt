@@ -59,6 +59,8 @@ set(SOURCES
   src/homotopy/homotopy_class_planner.cpp
   src/homotopy/visibility_graph_search.cpp
   src/homotopy/visibility_graph.cpp
+  src/homotopy/voronoi_graph_search.cpp
+  src/homotopy/voronoi_graph.cpp
   src/homotopy/h_signature.cpp
   src/planner/optimal_planner.cpp
   src/obstacles/esdf.cpp

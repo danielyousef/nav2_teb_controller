@@ -12,6 +12,17 @@ teb_controller:
     FollowPath:
       hcp:
         activate: false
+        efficiency_anchor_floor: 0.2
+        feasibility_gate: true
+        max_classes: 5.0
+        min_clearance: 0.3
+        parallel_optimization: true
+        progress_slack: 0.1
+        route_grace_time: 1.0
+        search_rate: 10.0
+        selection_hysteresis: 0.9
+        switch_block_time: 2.0
+        window_containment: true
       log_level: debug
       obstacles:
         cost_exponent: 2.0
@@ -132,7 +143,18 @@ teb_controller:
 
 | Param | Type | Default | Constraints | Description | Consumed by |
 |---|---|---|---|---|---|
-| `FollowPath.hcp.activate` | `bool` | `false` |  | Activate homotopy class planning. NOT IMPLEMENTED YET, keep false: enabling it makes configure() log an error and planning falls back to a stub. | TEBController::configure. |
+| `FollowPath.hcp.activate` | `bool` | `false` |  | Activate homotopy class planning: homotopy-distinct candidate paths are found on a Voronoi (GVD) graph extracted from the ESDF, each class is optimized by its own persistent DiscreteTEBPlanner instance, and the best feasible candidate is selected (with class-switch hysteresis). Falls back to the direct planner without obstacle data or when no classes are found. | TEBController::configure, HomotopyClassPlanner::plan. |
+| `FollowPath.hcp.max_classes` | `int` | `5` | parameter must be within bounds [1, 10] | Maximum number of homotopy classes to explore per tick. Each class costs one full TEB optimization, so this directly scales planning latency. | HomotopyClassPlanner::plan (candidate budget). |
+| `FollowPath.hcp.search_rate` | `double` | `10.0` | parameter must be within bounds [0.1, 100.0] | Rate [Hz] at which the graph search itself (GVD extraction + Yen enumeration) is re-executed, independent of the controller rate. Between refreshes the cached homotopy classes are reused and only the per-class TEB optimization runs. The search is additionally forced when a plan endpoint moved further than trajectory.reinit_dist since the last search. | HomotopyClassPlanner::plan. |
+| `FollowPath.hcp.min_clearance` | `double` | `0.3` | parameter must be within bounds [0.05, 10.0] | Minimum obstacle clearance [m] for Voronoi (GVD) ridge cells and the graph-search connector segments. This shapes the topology graph only — physical footprint safety is enforced separately by the ESDF obstacle edges and the feasibility gate. Choose well below the footprint circumradius so aisles/corridors remain representable; typical value ≈ 0.2–0.5 × robot radius. | TEBController::configure, VoronoiGraphSearch / VisibilityGraphSearch construction. |
+| `FollowPath.hcp.selection_hysteresis` | `double` | `0.9` | parameter must be within bounds [0.01, 1.0] | Hysteresis factor for best-route selection: a competing route must be CHEAPER than the current best route by this factor (efficiency_new <= efficiency_best * selection_hysteresis) to take over, where the comparison uses the EFFICIENCY cost category (time-optimal + shortest-path + smoothness edges), not the total chi2. 0.9 = the new route needs a 10% efficiency advantage. Prevents flip-flopping between near-equal routes. | HomotopyClassPlanner::selectBestCandidate. |
+| `FollowPath.hcp.route_grace_time` | `double` | `1.0` | parameter must be within bounds [0.0, 10.0] | Grace period [s] for best-route continuity: when the previous best route's GVD class blinks out of a search round (transient divergence or re-extraction churn) but its route entry still exists, a candidate is re-synthesized from the route's last known polyline so it competes with a fresh cost — instead of the tick collapsing to cheapest-of-the-day and ping-ponging between homotopy classes. After the grace expires (route genuinely gone/blocked) selection proceeds normally. 0 disables. | HomotopyClassPlanner::synthesizePrevRouteCandidate. |
+| `FollowPath.hcp.feasibility_gate` | `bool` | `true` |  | Reject candidates whose optimized band still intersects lethal ESDF cells within the footprint (same check as the controller's hard feasibility stop, applied per candidate after optimization). Through-obstacle bands then never win selection even when their penalty cost is low. | HomotopyClassPlanner::passesFeasibilityGate. |
+| `FollowPath.hcp.window_containment` | `bool` | `true` |  | Reject candidates whose optimized band leaves the mapped local-costmap window (0.5 m inward margin). Outside the window the ESDF clamps to its boundary value, so unknown space reads as free and collision-free — such phantom routes carry near-zero costs, win selection, then vanish in later rounds (churn source, benchmark_test_20). Skipped when the band's final pose lies outside the window itself (long-haul legs). | HomotopyClassPlanner::staysInWindow. |
+| `FollowPath.hcp.progress_slack` | `double` | `0.1` | parameter must be within bounds [0.0, 1.0] | Progress guard for best-route takeover: while the current best route is offered, a competing route must not be a detour — its band arc length may exceed the current best's by at most this fraction (0.1 = max 10% longer) IN ADDITION to the efficiency hysteresis. All bands span robot → mission goal, so arc length is a comparable progress estimate (ΣΔt alone barely rewards shorter geometry). Not applied when the current route is missing/infeasible — dead-end escapes may be arbitrarily longer. | HomotopyClassPlanner::selectBestCandidateIndex. |
+| `FollowPath.hcp.efficiency_anchor_floor` | `double` | `0.2` | parameter must be within bounds [0.0, 100.0] | Distrust threshold for the efficiency hysteresis anchor: anchors below this floor come from bands that read free space beyond the mapped local-costmap window (benchmark_test_20 anchors of 0.007–0.07) and are meaningless. While such a route is current best, it loses its hysteresis/progress protection and its ranking privilege — realistic competitors take over by plain min-cost; the distrusted route remains available as a last-resort fallback. Set 0 to disable. | HomotopyClassPlanner::selectBestCandidateIndex. |
+| `FollowPath.hcp.switch_block_time` | `double` | `2.0` | parameter must be within bounds [0.0, 30.0] | Time [s] after a best-route switch during which further switches are blocked outright, regardless of cost differences (unless the current best route becomes infeasible). Tune to the robot's dynamics — slow machines need longer blocks. | HomotopyClassPlanner::selectBestCandidate. |
+| `FollowPath.hcp.parallel_optimization` | `bool` | `true` |  | Optimize the per-route TEB candidates in parallel (one thread per route). Route identity assignment and best-route selection remain sequential; each route owns an isolated optimizer instance, so solves are independent. Set false to force sequential optimization (debugging / single-core targets). | HomotopyClassPlanner::optimizeCandidates. |
 
 ## `path_tracker`
 

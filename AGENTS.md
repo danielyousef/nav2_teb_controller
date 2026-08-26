@@ -43,8 +43,8 @@ colcon test --packages-select nav2_teb_controller --event-handlers console_direc
 ```
 
 Note: `colcon test` also runs uncrustify/flake8/pep257/lint_cmake over the whole package; several of those
-pre-existing style failures are unrelated to C++ code (launch files, CMake) — the 3 gtest suites are the
-authoritative functional tests.
+pre-existing style failures are unrelated to C++ code (launch files, CMake) — the gtest suites (one per edge
+class, planner graph-lifecycle, homotopy) are the authoritative functional tests.
 
 ## Directory Layout
 
@@ -75,9 +75,13 @@ authoritative functional tests.
 │   │   ├── edge_costmap_obstacle.h      # Legacy (NOT wired)
 │   │   ├── edge_via_point.h             # NOT wired
 │   │   └── edge_prefer_rotdir.h         # NOT wired
-│   ├── homotopy/                        # Homotopy Class Planning — INTERFACES ONLY, TBD
-│   │   ├── homotopy_class_planner.hpp   # Wrapper (plan() is a stub returning false)
-│   │   ├── graph_search_interface.hpp, visibility_graph*.hpp, h_signature.hpp, teb_candidate.hpp
+│   ├── homotopy/                        # Homotopy Class Planning (implemented, hcp.activate)
+│   │   ├── homotopy_class_planner.hpp   # Wrapper: per-class planners, hysteresis selection
+│   │   ├── graph_search_interface.hpp   # Search ABC (+ setObstacleMap)
+│   │   ├── graph_algorithms.hpp         # Templated Dijkstra / Yen / dedup (shared)
+│   │   ├── voronoi_graph*.hpp           # DEFAULT search: reduced GVD from the ESDF
+│   │   ├── visibility_graph*.hpp        # Fallback search: offset keypoints + clearance
+│   │   ├── h_signature.hpp, teb_candidate.hpp
 │   ├── obstacles/esdf.hpp               # ObstacleMap2D: Meijster EDT + bilinear query + gradient
 │   ├── planner/
 │   │   ├── planner_interface.hpp        # PlannerBase + PlannerInterface<TEB> ABCs
@@ -91,7 +95,9 @@ authoritative functional tests.
 │   ├── homotopy/homotopy_class_planner.cpp  # Stub
 │   ├── homotopy/visibility_graph_search.cpp # Stub
 │   └── obstacles/esdf.cpp               # Meijster EDT algorithm
-├── test/unit/g2o_types/                # 3 gtest files (edge_time_optimal, path_smoothness, shortest_path)
+├── test/unit/g2o_types/                # gtest per edge class (numeric-Jacobian checks)
+├── test/unit/planner/                  # planner graph-lifecycle tests
+├── test/unit/homotopy/                 # H-signature / graph algorithms / Voronoi / HCP tests
 ├── scripts/footprint_polygon_to_circles.py
 ├── scripts/gen_params_docs.py   # generates doc/parameters.md from the schema (make docs)
 ├── launch/nav2_teb_controller_launch.py
