@@ -32,6 +32,7 @@ controller_server:
       log_level: "debug"  # debug | info | warn | error | fatal
       path_tracker:
         activate: true
+        type: "feedforward"
       hcp:
         activate: false
         max_classes: 5

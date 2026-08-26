@@ -13,6 +13,13 @@ project-state details live.
 - Parameter library via `generate_parameter_library` (schema =
   `config/teb_controller_parameters.yaml`; doc/parameters.md auto-generated via `make docs`)
 - TEBVisualizer: 7 RViz topics (local plan, lookahead, poses, obstacles, curvature radii, footprint)
+- `PathHandler` (step 2 of `computeVelocityCommands`: TF lookup + `pruneGlobalPlan` + `transformAndTrimPlan` +
+  overwrite of the start pose with the robot pose). Holds a `Costmap2D` ref + global frame (unit-testable).
+- `BandController` abstraction (step 6): abstract base `BandController` (NVI, applies common velocity/steering
+  `applySaturation` after the implementation-specific `computeRawCommand`), selected inline in
+  `TEBController::configure` via a small `if` on `path_tracker.type`. `FeedForwardController` (reads the planned
+  band velocity) is the only implemented tracker; `StanleyController` / `LyapunovController` were reverted and
+  will be re-added later. Consumed by: `TEBController::configure`.
 
 ### Trajectory Optimization (g2o)
 - 27 custom g2o edge classes + 2 vertex types (21 wired in `buildGraph`; acceleration/jerk/steering-rate
@@ -31,8 +38,10 @@ project-state details live.
   call sites (feasibility, obstacle-edge culling, footprint check) skip gradient + normalization
 
 ### TEB Utilities
-- initFromPath, autoResize, updateAndPrune, extractVelocity, getVelocityCommand,
-  pruneGlobalPlan, transformAndTrimPlan
+- initFromPath, autoResize, updateAndPrune, checkFeasibility, computeCurvature
+- `BandController` module: extractVelocity, getVelocityCommand, saturateVelocity, saturateSteeringAngle,
+  convertAckermannToTwist, convertTwistToAckermann (moved out of teb_utils)
+- `PathHandler`: pruneGlobalPlan, transformAndTrimPlan (moved out of teb_utils)
 - Velocity saturation (Twist, proportional option), Ackermann↔Twist conversions,
   steering-angle rate saturation, computeCurvature
 

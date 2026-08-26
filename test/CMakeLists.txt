@@ -189,3 +189,20 @@ ament_add_gtest(test_edge_goal_angular_velocity_zero
 target_include_directories(test_edge_goal_angular_velocity_zero PRIVATE ${CMAKE_SOURCE_DIR}/include ${CMAKE_SOURCE_DIR}/include_shim)
 ament_target_dependencies(test_edge_goal_angular_velocity_zero rclcpp)
 target_link_libraries(test_edge_goal_angular_velocity_zero ${PROJECT_NAME})
+
+# ── test_feed_forward_controller ───────────────────────────────────────────────
+ament_add_gtest(test_feed_forward_controller
+  unit/test_feed_forward_controller.cpp
+)
+target_include_directories(test_feed_forward_controller PRIVATE ${CMAKE_SOURCE_DIR}/include_shim ${CMAKE_SOURCE_DIR}/include)
+ament_target_dependencies(test_feed_forward_controller rclcpp)
+target_link_libraries(test_feed_forward_controller ${PROJECT_NAME} teb_controller_parameters)
+
+# ── test_path_handler ──────────────────────────────────────────────────────────
+ament_add_gtest(test_path_handler
+  unit/test_path_handler.cpp
+)
+target_include_directories(test_path_handler PRIVATE ${CMAKE_SOURCE_DIR}/include_shim ${CMAKE_SOURCE_DIR}/include)
+ament_target_dependencies(test_path_handler rclcpp nav2_costmap_2d tf2_ros)
+target_link_libraries(test_path_handler ${PROJECT_NAME} teb_controller_parameters)
+ament_target_dependencies(test_path_handler rclcpp nav2_costmap_2d tf2_ros)

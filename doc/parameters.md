@@ -46,6 +46,7 @@ teb_controller:
         verbose: false
       path_tracker:
         activate: true
+        type: feedforward
       recovery:
         activate: false
         divergence_detection_enable: false
@@ -137,7 +138,8 @@ teb_controller:
 
 | Param | Type | Default | Constraints | Description | Consumed by |
 |---|---|---|---|---|---|
-| `FollowPath.path_tracker.activate` | `bool` | `true` |  | If true, extract the velocity command from the optimized band (getVelocityCommand) unless a collision stop was issued. If false, always output a zero velocity. | TEBController::computeVelocityCommands. |
+| `FollowPath.path_tracker.activate` | `bool` | `true` |  | If true, extract the velocity command from the optimized band unless a collision stop was issued. If false, always output a zero velocity. | TEBController::computeVelocityCommands (gates the BandController output). |
+| `FollowPath.path_tracker.type` | `string` | `"feedforward"` | one of the specified values: ['feedforward'] | Selects the BandController implementation that turns the optimized band into a velocity command. Currently only 'feedforward' (read the planned band velocity) is implemented; selection is done inline in TEBController::configure. | TEBController::configure. |
 
 ## `trajectory`
 

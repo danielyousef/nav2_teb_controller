@@ -21,9 +21,19 @@ teb_controller:
         type: bool
         default_value: true
         description: >
-          If true, extract the velocity command from the optimized band (getVelocityCommand) unless a
-          collision stop was issued. If false, always output a zero velocity. Consumed by:
-          TEBController::computeVelocityCommands.
+          If true, extract the velocity command from the optimized band unless a collision stop was
+          issued. If false, always output a zero velocity. Consumed by:
+          TEBController::computeVelocityCommands (gates the BandController output).
+
+      type:
+        type: string
+        default_value: "feedforward"
+        description: >
+          Selects the BandController implementation that turns the optimized band into a velocity
+          command. Currently only 'feedforward' (read the planned band velocity) is implemented;
+          selection is done inline in TEBController::configure. Consumed by: TEBController::configure.
+        validation:
+          one_of<>: [["feedforward"]]
 
     trajectory:
       reinit_dist:

@@ -51,6 +51,9 @@ generate_parameter_library(
 set(SOURCES
   src/teb_controller.cpp
   src/core/teb_utils.cpp
+  src/path_handler.cpp
+  src/band_controller/band_controller.cpp
+  src/band_controller/feed_forward_controller.cpp
   #src/core/timed_elastic_band.cpp
   #src/planner/graph_search.cpp
   src/homotopy/homotopy_class_planner.cpp

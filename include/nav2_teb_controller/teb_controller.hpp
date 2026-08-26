@@ -26,6 +26,9 @@
 #include "nav2_teb_controller/homotopy/graph_search_interface.hpp"
 #include "nav2_teb_controller/homotopy/homotopy_class_planner.hpp"
 #include "nav2_teb_controller/homotopy/visibility_graph_search.hpp"
+#include "nav2_teb_controller/band_controller/band_controller.hpp"
+#include "nav2_teb_controller/band_controller/feed_forward_controller.hpp"
+#include "nav2_teb_controller/path_handler.hpp"
 #include "nav2_teb_controller/planner/optimal_planner.hpp"
 #include "nav2_teb_controller/planner/planner_interface.hpp"
 #include "nav2_teb_controller/visualization/teb_visualizer.hpp"
@@ -108,6 +111,10 @@ protected:
   std::unique_ptr<PlannerBase> planner_;
   PlannerInterface<TimedElasticBand> *teb_planner_;
   std::unique_ptr<TEBVisualizer> visualizer_;
+
+  // Path handling + band control
+  std::unique_ptr<PathHandler> path_handler_;
+  std::unique_ptr<BandController> band_controller_;
 
   // Visualization throttle (rate from params, default 30 Hz)
   rclcpp::Time last_visualize_time_{0, 0, RCL_ROS_TIME};

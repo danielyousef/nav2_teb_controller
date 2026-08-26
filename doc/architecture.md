@@ -96,12 +96,12 @@ sequenceDiagram
     participant ES as ESDF (ObstacleMap2D)
     participant P as DiscreteTEBPlanner
     participant V as TEBVisualizer
+    participant PH as PathHandler
+    participant BC as BandController
 
     N->>TC: computeVelocityCommands(pose, twist)
     TC->>TC: refresh dynamic params (if changed)
-    TC->>TC: pruneGlobalPlan (drop poses behind robot)
-    TC->>TF: transform + trim global plan (lookahead window)
-    TC->>TC: overwrite front pose with robot pose
+    TC->>PH: prepareLocalPlan (prune + transform/trim + overwrite start)
     TC->>CC: pose obstacles (ObstacleArrayMsg) if converter loaded
     TC->>P: updateObstacleContainer(obstacles)
     TC->>ES: ESDF.update(*costmap)  [throttled to costmap_converter_rate]
@@ -111,19 +111,19 @@ sequenceDiagram
     DP-->>TC: optimized TEB
     TC->>TC: checkFeasibility(teb, esdf, footprint)   -> stop on collision
     TC->>V: publish local plan + lookahead + poses + radii + footprint
-    TC->>TC: getVelocityCommand (lookahead extraction)
-    TC->>TC: saturateVelocity + saturateSteeringAngle (Ackermann)
+    TC->>BC: computeCommand(teb, pose, vel)  [FeedForward: getVelocityCommand]
+    BC->>BC: saturateVelocity + saturateSteeringAngle (Ackermann)
     TC-->>N: TwistStamped cmd_vel
 ```
 
 Details:
 
-1. **Pruning** — `pruneGlobalPlan` erases global-plan poses closer than `global_plan_prune_distance` to the robot
-   (in the plan frame).
-2. **Transform & trim** — `transformAndTrimPlan` takes the global plan, transforms it into the costmap frame and
-   clips it to a lookahead length (default `max_global_plan_lookahead_dist` = 5 m, but at most what was requested).
-   The last included pose becomes `goal_idx`; if the trimmed window reaches the very end of the global plan the
-   goal is treated as the final global goal (or `fix_goal` forces it).
+1. **Pruning** — `PathHandler::pruneGlobalPlan` erases global-plan poses closer than `global_plan_prune_distance`
+   to the robot (in the plan frame).
+2. **Transform & trim** — `PathHandler::transformAndTrimPlan` takes the global plan, transforms it into the costmap
+   frame and clips it to a lookahead length (default `max_global_plan_lookahead_dist` = 5 m, but at most what was
+   requested). The last included pose becomes `goal_idx`; if the trimmed window reaches the very end of the global
+   plan the goal is treated as the final global goal (or `fix_goal` forces it).
 3. **Start pose** — the front pose of the trimmed plan is overwritten with the *actual* robot pose, so the
    optimizer has marginally fresh starting conditions.
 4. **Obstacles** — the optional costmap converter (polygons) is fed to `updateObstacleContainer`; the ESDF is
@@ -131,10 +131,11 @@ Details:
 5. **Planning / optimization** — `DiscreteTEBPlanner::plan()` (section 4).
 6. **Feasibility** — hard check on the optimized TEB (section 6). If any footprint circle overlaps an LETHAL cell
    within `feasibility_check` [m] ahead, all control output is suppressed (`stop_cmd`).
-7. **Velocity command** — `getVelocityCommand` extracts a lookahead velocity from `s0 → s_k` over window
-   `k = control_look_ahead_poses` (bounded also by `dt_ref` and `min_time`), then `extractVelocity` computes the
-   finite-difference velocity. `saturateVelocity` clips against `v_max_*`, optionally *proportionally*
-   (`use_proportional_saturation`) so turning speed drops as the robot nears `v_max`.
+7. **Velocity command** — `BandController::computeCommand` (selected by `path_tracker.type`; for `FeedForward` the
+   default, `getVelocityCommand` extracts a lookahead velocity from `s0 → s_k` over window
+   `k = control_look_ahead_poses`, bounded also by `dt_ref` and `min_time`, then `extractVelocity` computes the
+   finite-difference velocity). `saturateVelocity` (common to all controllers) clips against `v_max_*`, optionally
+   *proportionally* (`use_proportional_saturation`) so turning speed drops as the robot nears `v_max`.
 8. **Steering limiting** — for Ackermann: `saturateSteeringAngle` converts the Twist to (speed, steering angle),
    rate-limits the angle by `steering_rate_max`, and converts back; the returned cmd is a `Twist` even for
    Ackermann robots (the angle is implicitly contained in `angular.z` and the driver reconstructs it).

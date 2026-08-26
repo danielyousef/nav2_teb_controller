@@ -89,6 +89,18 @@ void TEBController::configure(const rclcpp_lifecycle::LifecycleNode::WeakPtr &pa
   // Visu
   visualizer_ = std::make_unique<TEBVisualizer>(node);
   visualizer_->on_configure();
+
+  // Path handler + band controller
+  path_handler_ = std::make_unique<PathHandler>(params_, *tf_);
+  // TODO: reintroduce a createBandController factory once stanley/lyapunov controllers land.
+  if (params_.FollowPath.path_tracker.type == "feedforward") {
+    band_controller_ = std::make_unique<FeedForwardController>();
+  } else {
+    RCLCPP_WARN(logger_, "Unsupported path_tracker.type '%s'; falling back to 'feedforward'.",
+                params_.FollowPath.path_tracker.type.c_str());
+    band_controller_ = std::make_unique<FeedForwardController>();
+  }
+  band_controller_->configure(params_);
 }
 
 void TEBController::activate() {
@@ -135,49 +147,31 @@ geometry_msgs::msg::TwistStamped TEBController::computeVelocityCommands(
     params_ = param_listener_->get_params();  // later, needs_full_rebuild_ = true;
 
   // 2. Extract local lookahead window
-  // prune global plan to cut off parts of the past (spatially before the robot)
-  const double prune_dist = params_.FollowPath.trajectory.global_plan_prune_distance;
-  const double global_plan_lookahead =
-      params_.FollowPath.trajectory.max_global_plan_lookahead_dist;
-  double path_length_time_based = velocity.linear.x * 5.0;
-  double path_length =
-      std::clamp(1.0 * global_plan_lookahead, path_length_time_based, global_plan_lookahead);
-  int goal_idx;
   nav_msgs::msg::Path transformed_plan;
+  int goal_idx = 0;
   {
     PROFILE_BLOCK("prune_trim");
-    // Single latest-known transform lookup (plan frame → global frame). The previous
-    // stamped-time lookup (plan stamp) blocked up to its 0.5 s timeout whenever the
-    // exact stamped transform was not cached yet — the source of single-tick 10 ms
-    // prune_trim spikes. TimePointZero uses the newest available transform; the plan
-    // frame is quasi-static, so this is equivalent except that it never blocks.
-    const std::string plan_frame = global_plan_.poses.front().header.frame_id;
-    try {
-      const geometry_msgs::msg::TransformStamped plan_to_global_stamped =
-          tf_->lookupTransform(costmap_ros_->getGlobalFrameID(), plan_frame, tf2::TimePointZero);
-      // Manual construction: tf2::fromMsg/toMsg templates don't match the
-      // allocator-parameterized rosidl types on all rmw configurations.
-      const auto &t = plan_to_global_stamped.transform;
-      const tf2::Transform plan_to_global(
-          tf2::Quaternion(t.rotation.x, t.rotation.y, t.rotation.z, t.rotation.w),
-          tf2::Vector3(t.translation.x, t.translation.y, t.translation.z));
-      pruneGlobalPlan(plan_to_global, pose, global_plan_, prune_dist);
-      transformed_plan = transformAndTrimPlan(
-          plan_to_global, global_plan_, pose, *costmap_ros_->getCostmap(),
-          costmap_ros_->getGlobalFrameID(), clock_->now(), path_length, &goal_idx);
-    } catch (const tf2::TransformException &ex) {
-      RCLCPP_DEBUG(logger_, "TF transform failed: %s", ex.what());
-    }
-
-    if (transformed_plan.poses.empty()) {
-      RCLCPP_INFO(logger_, "TEBController: Empty plan.");
+    if (!path_handler_->prepareLocalPlan(
+            global_plan_, pose, velocity, clock_->now(), *costmap_ros_->getCostmap(),
+            costmap_ros_->getGlobalFrameID(), transformed_plan, goal_idx)) {
       return cmd_vel;
     }
-    // Overwrite start with actual robot pose so TEB can use plan as initial trajectory
-    if (transformed_plan.poses.size() == 1)  // plan only contains the goal
-      transformed_plan.poses.insert(transformed_plan.poses.begin(),
-                                    geometry_msgs::msg::PoseStamped());
-    transformed_plan.poses.front() = pose;
+  }
+  {
+    const auto &back = transformed_plan.poses.empty() ? geometry_msgs::msg::PoseStamped{}
+                                                      : transformed_plan.poses.back();
+    const auto &gf =
+        global_plan_.poses.empty() ? geometry_msgs::msg::PoseStamped{} : global_plan_.poses.back();
+    RCLCPP_DEBUG(logger_,
+                 "[TEBController] step2: transformed_plan=%zu poses, emitted goal_idx=%d, "
+                 "global_plan_=%zu poses, transformed.back=(%.2f,%.2f) global_final=(%.2f,%.2f)",
+                 transformed_plan.poses.size(), goal_idx, global_plan_.poses.size(),
+                 back.pose.position.x, back.pose.position.y, gf.pose.position.x,
+                 gf.pose.position.y);
+  }
+  if (transformed_plan.poses.empty()) {
+    RCLCPP_INFO(logger_, "TEBController: Empty plan.");
+    return cmd_vel;
   }
 
   // Update obstacles
@@ -211,6 +205,12 @@ geometry_msgs::msg::TwistStamped TEBController::computeVelocityCommands(
     PROFILE_BLOCK("planner_plan");
     bool final_goal = (goal_idx == ((int)global_plan_.poses.size() - 1)) ||
                       params_.FollowPath.optimizer.fix_goal;
+    RCLCPP_DEBUG(logger_,
+                 "[TEBController] step3: goal_idx=%d global_plan_=%zu final_goal=%d "
+                 "(fix_goal=%d, idx_eq_size_minus1=%d)",
+                 goal_idx, global_plan_.poses.size(), (int)final_goal,
+                 (int)params_.FollowPath.optimizer.fix_goal,
+                 (int)(goal_idx == ((int)global_plan_.poses.size() - 1)));
     teb_planner_->setFixedGoal(final_goal);
     teb_planner_->setFeedback(last_ackermann_cmd_.drive);
     success = planner_->plan(transformed_plan, velocity);
@@ -254,26 +254,9 @@ geometry_msgs::msg::TwistStamped TEBController::computeVelocityCommands(
     PROFILE_BLOCK("velocity_output");
     const bool activate = params_.FollowPath.path_tracker.activate;
     if (activate && !stop_cmd) {
-      const double dt_ref = params_.FollowPath.trajectory.dt_ref;
-      const int lookahead = params_.FollowPath.trajectory.control_look_ahead_poses;
-      const double min_look_ahead_time = params_.FollowPath.trajectory.control_min_look_ahead_time;
-      cmd_vel.twist = getVelocityCommand(teb, dt_ref, lookahead, min_look_ahead_time, false);
-
-      // Saturate velocity
-      const double v_max_x = params_.FollowPath.robot.v_max_x;
-      const double v_max_y = params_.FollowPath.robot.v_max_y;
-      const double v_max_theta = params_.FollowPath.robot.v_max_theta;
-      const double v_max_x_backwards = params_.FollowPath.robot.v_max_x_backwards;
-      const double steering_rate_max = params_.FollowPath.robot.steering_rate_max;
-      const double wheelbase = params_.FollowPath.robot.wheelbase;
-      const bool use_proportional_saturation =
-          params_.FollowPath.robot.use_proportional_saturation;
-      double current_angle = last_ackermann_cmd_.drive.steering_angle;
-      saturateVelocity(cmd_vel.twist, v_max_x, v_max_y, v_max_theta, v_max_x_backwards,
-                       use_proportional_saturation);
-      // Saturate steering angle
-      auto dt = (clock_->now() - last_cmd_vel_.header.stamp).nanoseconds() / 1e9;
-      saturateSteeringAngle(cmd_vel.twist, current_angle, steering_rate_max, wheelbase, dt);
+      const double dt = (clock_->now() - last_cmd_vel_.header.stamp).nanoseconds() / 1e9;
+      cmd_vel.twist = band_controller_->computeCommand(
+          teb, pose, velocity, last_ackermann_cmd_.drive.steering_angle, dt);
     }
     last_cmd_vel_ = cmd_vel;
   }
