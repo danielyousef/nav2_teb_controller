@@ -32,6 +32,12 @@ project-state details live.
 - TEBVisualizer: 7 RViz topics (local plan, lookahead, poses, obstacles, curvature radii, footprint)
 - `PathHandler` (step 2 of `computeVelocityCommands`: TF lookup + `pruneGlobalPlan` + `transformAndTrimPlan` +
   overwrite of the start pose with the robot pose). Holds a `Costmap2D` ref + global frame (unit-testable).
+- **Sticky local-goal hysteresis** (`trajectory.local_goal_hysteresis`, default 1.0 m): once the lookahead
+  window's furthest pose (the TEB endpoint) has advanced it is anchored by its *pose* and only advances, never
+  recedes, unless the freshly trimmed goal falls more than `local_goal_hysteresis` behind it (genuine reversal).
+  Pose-anchored (not index-anchored) so it survives the per-tick prune step; `PathHandler::reset()` is called
+  from `TEBController::setPlan` to drop the sticky goal across missions. Kills the oscillation where a temporary
+  homotopy detour + the speed-scaled lookahead / costmap-window cut pulled the local goal back tick-to-tick.
 - `BandController` abstraction (step 6): abstract base `BandController` (NVI, applies common velocity/steering
   `applySaturation` after the implementation-specific `computeRawCommand`), selected inline in
   `TEBController::configure` via a small `if` on `path_tracker.type`. `FeedForwardController` (reads the planned

@@ -121,6 +121,9 @@ void TEBController::cleanup() {
 
 void TEBController::setPlan(const nav_msgs::msg::Path &path) {
   global_plan_ = path;
+  if (path_handler_) {
+    path_handler_->reset();  // drop sticky local-goal hysteresis across missions
+  }
   planner_->clear();
   RCLCPP_INFO(logger_, "New global plan received (%zu poses)", path.poses.size());
   RCLCPP_INFO(logger_, "Force re-init.");

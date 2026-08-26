@@ -64,6 +64,7 @@ controller_server:
         global_plan_prune_distance: 0.25  # has to be smaller than reinit dist
         control_min_look_ahead_time: 0.0
         min_prune_distance: 0.025
+        local_goal_hysteresis: 1.0
       robot:
         footprint:
           use_local_costmap: false

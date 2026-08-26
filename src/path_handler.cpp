@@ -3,6 +3,7 @@
 #include <tf2/transform_datatypes.h>
 #include <tf2/utils.h>
 
+#include <algorithm>
 #include <cmath>
 #include <nav2_util/geometry_utils.hpp>
 #include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
@@ -63,11 +64,11 @@ bool PathHandler::prepareLocalPlan(const nav_msgs::msg::Path &global_plan,
   return true;
 }
 
-bool PathHandler::pruneGlobalPlan(const tf2::Transform &plan_to_global,
-                                  const geometry_msgs::msg::PoseStamped &robot_pose,
-                                  nav_msgs::msg::Path &global_plan, double dist_behind_robot) {
+size_t PathHandler::pruneGlobalPlan(const tf2::Transform &plan_to_global,
+                                    const geometry_msgs::msg::PoseStamped &robot_pose,
+                                    nav_msgs::msg::Path &global_plan, double dist_behind_robot) {
   if (global_plan.poses.empty()) {
-    return true;
+    return 0;
   }
   // Robot pose (global frame) → plan frame by pure math (no TF lookup, no blocking)
   const tf2::Vector3 robot_global(robot_pose.pose.position.x, robot_pose.pose.position.y, 0.0);
@@ -94,10 +95,11 @@ bool PathHandler::pruneGlobalPlan(const tf2::Transform &plan_to_global,
     }
     ++it;
   }
+  const size_t erased = static_cast<size_t>(std::distance(global_plan.poses.begin(), erase_end));
   if (erase_end != global_plan.poses.begin()) {
     global_plan.poses.erase(global_plan.poses.begin(), erase_end);
   }
-  return true;
+  return erased;
 }
 
 nav_msgs::msg::Path PathHandler::transformAndTrimPlan(
@@ -156,6 +158,7 @@ nav_msgs::msg::Path PathHandler::transformAndTrimPlan(
   plan_to_global_msg.transform.rotation.z = plan_to_global_rot.z();
   plan_to_global_msg.transform.rotation.w = plan_to_global_rot.w();
 
+  // ── Build the natural (un-stickied) lookahead window ──
   geometry_msgs::msg::PoseStamped newer_pose;
   double plan_length = 0.0;
   while (i < static_cast<int>(global_plan.poses.size()) && sq_dist <= sq_dist_threshold &&
@@ -176,11 +179,62 @@ nav_msgs::msg::Path PathHandler::transformAndTrimPlan(
     tf2::doTransform(global_plan.poses.back(), newer_pose, plan_to_global_msg);
     transformed_path.poses.push_back(newer_pose);
   }
-  if (current_goal_idx) {
-    *current_goal_idx = empty_branch ? int(global_plan.poses.size()) - 1 : i - 1;
+  // Index (pruned-relative) of the natural lookahead goal = furthest included pose.
+  int natural_idx = empty_branch ? static_cast<int>(global_plan.poses.size()) - 1 : i - 1;
+
+  // ── One-sided local-goal hysteresis (local_goal_hysteresis) ──
+  // The sticky goal is anchored by its POSE (not an index), so it is invariant to how many
+  // leading poses the prune step dropped this tick. Once the goal has advanced it only ever
+  // advances, never recedes, unless the freshly trimmed goal falls more than
+  // local_goal_hysteresis behind the sticky one (a genuine large reversal). Keeps the TEB
+  // endpoint stable when a temporary homotopy detour would otherwise pull the local goal back
+  // tick-to-tick.
+  int effective_idx = natural_idx;
+  if (has_sticky_) {
+    // Locate the current plan pose nearest to the previous sticky goal.
+    int sticky_pruned = natural_idx;
+    double best_sq = 1e300;
+    for (int k = 0; k < static_cast<int>(global_plan.poses.size()); ++k) {
+      const auto &pp = global_plan.poses[k].pose.position;
+      const double d2 = (pp.x - last_goal_pos_.x()) * (pp.x - last_goal_pos_.x()) +
+                        (pp.y - last_goal_pos_.y()) * (pp.y - last_goal_pos_.y());
+      if (d2 < best_sq) {
+        best_sq = d2;
+        sticky_pruned = k;
+      }
+    }
+    const auto &nat_p = global_plan.poses[natural_idx].pose.position;
+    const double recede_dist =
+        std::hypot(nat_p.x - last_goal_pos_.x(), nat_p.y - last_goal_pos_.y());
+    if (recede_dist <= params_->FollowPath.trajectory.local_goal_hysteresis) {
+      effective_idx = std::max(natural_idx, sticky_pruned);  // keep sticky goal
+    } else {
+      effective_idx = natural_idx;  // allow genuine recede
+    }
+  }
+  effective_idx = std::clamp(effective_idx, 0, static_cast<int>(global_plan.poses.size()) - 1);
+
+  // Extend the window to the sticky goal (poses beyond the natural cut, e.g. outside the
+  // costmap window) so the stable endpoint is actually included.
+  for (int k = natural_idx + 1; k <= effective_idx; ++k) {
+    tf2::doTransform(global_plan.poses[k], newer_pose, plan_to_global_msg);
+    transformed_path.poses.push_back(newer_pose);
   }
 
+  if (current_goal_idx) {
+    *current_goal_idx = effective_idx;
+  }
+
+  // Persist hysteresis state (pose, plan frame).
+  has_sticky_ = true;
+  last_goal_pos_ = tf2::Vector3(global_plan.poses[effective_idx].pose.position.x,
+                                global_plan.poses[effective_idx].pose.position.y, 0.0);
   return transformed_path;
+}
+
+void PathHandler::reset() {
+  has_sticky_ = false;
+  last_goal_pos_ = tf2::Vector3(0.0, 0.0, 0.0);
 }
 
 }  // namespace nav2_teb_controller

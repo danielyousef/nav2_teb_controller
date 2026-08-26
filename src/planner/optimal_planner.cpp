@@ -120,8 +120,8 @@ bool DiscreteTEBPlanner::plan(const nav_msgs::msg::Path &initial_plan,
 
   if (!teb_.isInit()) {
     // Cold start
-    RCLCPP_INFO(rclcpp::get_logger("optimal_planner"),
-                "DiscreteTEBPlanner: Initialize new trajectory.");
+    RCLCPP_DEBUG(rclcpp::get_logger("optimal_planner"),
+                 "DiscreteTEBPlanner: Initialize new trajectory.");
     initFromPath(teb_, initial_plan, v_max_x, v_max_theta, overwrite_plan_orientation, min_samples,
                  allow_init_backward, final_goal);
   } else {

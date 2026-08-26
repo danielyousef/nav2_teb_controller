@@ -6,7 +6,7 @@
 // uncomment the define below, or build with -DBENCHMARK_TESTING.
 // When disabled, all PROFILE_* macros expand to nothing -> zero overhead.
 
-#define BENCHMARK_TESTING
+// #define BENCHMARK_TESTING
 
 #include <algorithm>
 #include <chrono>

@@ -37,12 +37,19 @@ public:
                         const nav2_costmap_2d::Costmap2D &costmap, const std::string &global_frame,
                         nav_msgs::msg::Path &out_local_plan, int &out_goal_idx);
 
-private:
-  static bool pruneGlobalPlan(const tf2::Transform &plan_to_global,
-                              const geometry_msgs::msg::PoseStamped &robot_pose,
-                              nav_msgs::msg::Path &global_plan, double dist_behind_robot);
+  /// Reset the local-goal hysteresis state. Call when a new global plan is supplied so the
+  /// sticky goal does not persist across missions (PathHandler::prepareLocalPlan keeps the
+  /// last emitted goal index sticky across ticks within one plan).
+  void reset();
 
-  static nav_msgs::msg::Path transformAndTrimPlan(
+private:
+  /// @return number of poses erased from the front of @p global_plan (the prune offset), so
+  ///         pruned-relative indices can be mapped back to absolute global-plan indices.
+  static size_t pruneGlobalPlan(const tf2::Transform &plan_to_global,
+                                const geometry_msgs::msg::PoseStamped &robot_pose,
+                                nav_msgs::msg::Path &global_plan, double dist_behind_robot);
+
+  nav_msgs::msg::Path transformAndTrimPlan(
       const tf2::Transform &plan_to_global, const nav_msgs::msg::Path &global_plan,
       const geometry_msgs::msg::PoseStamped &global_pose,
       const nav2_costmap_2d::Costmap2D &costmap, const std::string &global_frame,
@@ -50,6 +57,13 @@ private:
 
   const teb_controller::Params *params_{nullptr};
   tf2_ros::Buffer &tf_;
+
+  /// Local-goal hysteresis state (see local_goal_hysteresis param). The sticky goal is
+  /// anchored by its POSE position (`last_goal_pos_`, plan frame), not by an index, so it
+  /// survives the per-tick prune step that drops a variable number of leading poses.
+  /// `has_sticky_` is false until the first plan is emitted (after reset() it is cleared).
+  bool has_sticky_ = false;
+  tf2::Vector3 last_goal_pos_{0.0, 0.0, 0.0};
 };
 
 }  // namespace nav2_teb_controller

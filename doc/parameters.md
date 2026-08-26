@@ -17,7 +17,7 @@ teb_controller:
         max_classes: 5.0
         min_clearance: 0.3
         parallel_optimization: true
-        progress_slack: 0.1
+        progress_slack: 0.5
         route_grace_time: 1.0
         search_rate: 10.0
         selection_hysteresis: 0.9
@@ -92,6 +92,7 @@ teb_controller:
         dt_hyst: 0.05
         dt_ref: 0.3
         global_plan_prune_distance: 0.5
+        local_goal_hysteresis: 1.0
         max_angle_diff: 0.15
         max_global_plan_lookahead_dist: 5.0
         max_samples: 50.0
@@ -151,7 +152,7 @@ teb_controller:
 | `FollowPath.hcp.route_grace_time` | `double` | `1.0` | parameter must be within bounds [0.0, 10.0] | Grace period [s] for best-route continuity: when the previous best route's GVD class blinks out of a search round (transient divergence or re-extraction churn) but its route entry still exists, a candidate is re-synthesized from the route's last known polyline so it competes with a fresh cost — instead of the tick collapsing to cheapest-of-the-day and ping-ponging between homotopy classes. After the grace expires (route genuinely gone/blocked) selection proceeds normally. 0 disables. | HomotopyClassPlanner::synthesizePrevRouteCandidate. |
 | `FollowPath.hcp.feasibility_gate` | `bool` | `true` |  | Reject candidates whose optimized band still intersects lethal ESDF cells within the footprint (same check as the controller's hard feasibility stop, applied per candidate after optimization). Through-obstacle bands then never win selection even when their penalty cost is low. | HomotopyClassPlanner::passesFeasibilityGate. |
 | `FollowPath.hcp.window_containment` | `bool` | `true` |  | Reject candidates whose optimized band leaves the mapped local-costmap window (0.5 m inward margin). Outside the window the ESDF clamps to its boundary value, so unknown space reads as free and collision-free — such phantom routes carry near-zero costs, win selection, then vanish in later rounds (churn source, benchmark_test_20). Skipped when the band's final pose lies outside the window itself (long-haul legs). | HomotopyClassPlanner::staysInWindow. |
-| `FollowPath.hcp.progress_slack` | `double` | `0.1` | parameter must be within bounds [0.0, 1.0] | Progress guard for best-route takeover: while the current best route is offered, a competing route must not be a detour — its band arc length may exceed the current best's by at most this fraction (0.1 = max 10% longer) IN ADDITION to the efficiency hysteresis. All bands span robot → mission goal, so arc length is a comparable progress estimate (ΣΔt alone barely rewards shorter geometry). Not applied when the current route is missing/infeasible — dead-end escapes may be arbitrarily longer. | HomotopyClassPlanner::selectBestCandidateIndex. |
+| `FollowPath.hcp.progress_slack` | `double` | `0.5` | parameter must be within bounds [0.0, 1.0] | Progress guard for best-route takeover: while the current best route is offered, a competing route must not be a detour — its band arc length may exceed the current best's by at most this fraction (0.1 = max 10% longer) IN ADDITION to the efficiency hysteresis. All bands span robot → mission goal, so arc length is a comparable progress estimate (ΣΔt alone barely rewards shorter geometry). Not applied when the current route is missing/infeasible — dead-end escapes may be arbitrarily longer. | HomotopyClassPlanner::selectBestCandidateIndex. |
 | `FollowPath.hcp.efficiency_anchor_floor` | `double` | `0.2` | parameter must be within bounds [0.0, 100.0] | Distrust threshold for the efficiency hysteresis anchor: anchors below this floor come from bands that read free space beyond the mapped local-costmap window (benchmark_test_20 anchors of 0.007–0.07) and are meaningless. While such a route is current best, it loses its hysteresis/progress protection and its ranking privilege — realistic competitors take over by plain min-cost; the distrusted route remains available as a last-resort fallback. Set 0 to disable. | HomotopyClassPlanner::selectBestCandidateIndex. |
 | `FollowPath.hcp.switch_block_time` | `double` | `2.0` | parameter must be within bounds [0.0, 30.0] | Time [s] after a best-route switch during which further switches are blocked outright, regardless of cost differences (unless the current best route becomes infeasible). Tune to the robot's dynamics — slow machines need longer blocks. | HomotopyClassPlanner::selectBestCandidate. |
 | `FollowPath.hcp.parallel_optimization` | `bool` | `true` |  | Optimize the per-route TEB candidates in parallel (one thread per route). Route identity assignment and best-route selection remain sequential; each route owns an isolated optimizer instance, so solves are independent. Set false to force sequential optimization (debugging / single-core targets). | HomotopyClassPlanner::optimizeCandidates. |
@@ -184,6 +185,7 @@ teb_controller:
 | `FollowPath.trajectory.global_plan_prune_distance` | `double` | `0.5` |  | Poses of the global plan farther behind the robot than this distance [m] are pruned. | pruneGlobalPlan. |
 | `FollowPath.trajectory.control_min_look_ahead_time` | `double` | `0.0` |  | Minimum lookahead time [s] for the velocity extraction. | getVelocityCommand. |
 | `FollowPath.trajectory.min_prune_distance` | `double` | `0.0` |  | Minimum distance [m] the band start pose may lag behind the robot pose before the first pose is dropped. | updateAndPrune. |
+| `FollowPath.trajectory.local_goal_hysteresis` | `double` | `1.0` | parameter must be within bounds [0.0, 50.0] | Hysteresis [m] on the local lookahead goal (the furthest global-plan pose kept as the TEB endpoint).           Once the local goal has advanced along the global plan it is sticky (it only ever advances, never recedes) unless the freshly trimmed goal falls more than this distance behind the sticky one (a genuine large reversal). Prevents the TEB endpoint from oscillating when the robot briefly drives away on an alternative homotopy and the time-based lookahead (max_global_plan_lookahead_dist, speed-scaled) or the costmap-window cut would otherwise pull the local goal back tick-to-tick. 0 disables (classic, non-sticky behavior). | PathHandler::transformAndTrimPlan. |
 
 ## `robot`
 

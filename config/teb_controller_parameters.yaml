@@ -260,6 +260,20 @@ teb_controller:
         description: >
           Minimum distance [m] the band start pose may lag behind the robot pose before the first pose
           is dropped. Consumed by: updateAndPrune.
+      local_goal_hysteresis:
+        type: double
+        default_value: 1.0
+        description: >
+          Hysteresis [m] on the local lookahead goal (the furthest global-plan pose kept as the TEB
+          endpoint).           Once the local goal has advanced along the global plan it is sticky (it only
+          ever advances, never recedes) unless the freshly trimmed goal falls more than this distance
+          behind the sticky one (a genuine large reversal). Prevents the TEB endpoint from oscillating
+          when the robot briefly drives away on an alternative homotopy and the time-based lookahead
+          (max_global_plan_lookahead_dist, speed-scaled) or the costmap-window cut would otherwise pull
+          the local goal back tick-to-tick. 0 disables (classic, non-sticky behavior). Consumed by:
+          PathHandler::transformAndTrimPlan.
+        validation:
+          bounds<>: [0.0, 50.0]
 
     robot:
       footprint:
